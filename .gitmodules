@@ -1,3 +1,9 @@
 [submodule "imgui"]
 	path = imgui
 	url = https://github.com/ocornut/imgui.git
+[submodule "dsp"]
+	path = dsp
+	url = https://github.com/Signalsmith-Audio/dsp.git
+[submodule "implot"]
+	path = implot
+	url = https://github.com/epezent/implot.git

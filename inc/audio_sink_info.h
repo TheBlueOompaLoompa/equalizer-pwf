@@ -6,9 +6,9 @@
 class AudioSinkInfo {
 public:
     uint32_t id;
-    std::string nick;
+    std::string name;
 
-    AudioSinkInfo(uint32_t id, std::string nick);
+    AudioSinkInfo(uint32_t id, std::string name);
     ~AudioSinkInfo();
 };
 
