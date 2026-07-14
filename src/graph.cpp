@@ -1,5 +1,4 @@
 #include <charconv>
-#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <pipewire/keys.h>
@@ -8,13 +7,10 @@
 #include <vector>
 #include "graph.h"
 #include "pipewire/core.h"
-#include "pipewire/device.h"
 #include "pipewire/link.h"
 #include "pipewire/node.h"
-#include "pipewire/port.h"
 #include "pw_types.h"
 #include "spa/utils/dict.h"
-#include "spa/utils/hook.h"
 
 template<typename T>
 bool spa_dict_get_num(const spa_dict *props, const char* key, T& num) {
@@ -36,17 +32,12 @@ static void on_link_info(void *data, const struct pw_link_info *info) {
     link->info = (pw_link_info*)info;
     if(graph->nodes.find(info->input_node_id) != graph->nodes.end()) {
         if(graph->filter_id == info->input_node_id || graph->filter_id == info->output_node_id) return;
+        if(graph->sink_id == info->input_node_id || graph->sink_id == info->output_node_id) return;
 
         pw_registry_destroy(graph->registry, info->id);
 
-        bool has_output_conn = false;
-        if(graph->filter_linked) {
-            for(const auto &l : graph->links) {
-                if(l.second.info->output_node_id == graph->filter_id && l.second.info->input_node_id == info->input_node_id) has_output_conn = true;
-            }
-        }
-        graph->filter_linked = true;
-        if(!has_output_conn) {
+        if(!graph->filter_linked) {
+            graph->filter_linked = true;
             struct pw_properties *rprops0 = pw_properties_new(
                 PW_KEY_LINK_OUTPUT_NODE, std::to_string(graph->filter_id).c_str(),
                 PW_KEY_LINK_OUTPUT_PORT, "0",
@@ -81,14 +72,14 @@ static void on_link_info(void *data, const struct pw_link_info *info) {
         struct pw_properties *lprops0 = pw_properties_new(
             PW_KEY_LINK_OUTPUT_NODE, std::to_string(info->output_node_id).c_str(),
             PW_KEY_LINK_OUTPUT_PORT, "0",
-            PW_KEY_LINK_INPUT_NODE,  std::to_string(graph->filter_id).c_str(),
+            PW_KEY_LINK_INPUT_NODE,  std::to_string(graph->sink_id).c_str(),
             PW_KEY_LINK_INPUT_PORT,  "0",
             nullptr);
 
         struct pw_properties *lprops1 = pw_properties_new(
             PW_KEY_LINK_OUTPUT_NODE, std::to_string(info->output_node_id).c_str(),
             PW_KEY_LINK_OUTPUT_PORT, "1",
-            PW_KEY_LINK_INPUT_NODE,  std::to_string(graph->filter_id).c_str(),
+            PW_KEY_LINK_INPUT_NODE,  std::to_string(graph->sink_id).c_str(),
             PW_KEY_LINK_INPUT_PORT,  "1",
             nullptr);
 
@@ -116,6 +107,14 @@ static void on_node_info(void *data, const struct pw_node_info *info) {
     Graph* graph = static_cast<Graph*>(node->data);
 
     graph->nodes[info->id].info = (pw_node_info*)info;
+    const char* name = spa_dict_lookup(info->props, PW_KEY_NODE_NAME);
+    if(!name) return;
+    if(strcmp(name, "equalizer-pwf-sink") == 0) {
+        graph->sink_id = info->id;
+    }else if(strcmp(name, "equalizer-pwf-filter") == 0) {
+        graph->filter_id = info->id;
+    }
+    
 }
 
 static const pw_link_events link_events = {
@@ -139,15 +138,40 @@ void Graph::on_global_reg_event(uint32_t id, uint32_t permissions, const char *t
     }else if(strcmp(type, PW_TYPE_INTERFACE_Node) == 0) {
         const char* desc = spa_dict_lookup(props, PW_KEY_NODE_DESCRIPTION);
         if(desc && strcmp(desc, "Equalizer PWF") == 0) filter_id = id;
-        const char* media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
-        if(media_class && strcmp(media_class, "Audio/Sink") == 0) {
-            nodes.insert_or_assign(id, PwNode {
-                .info = nullptr,
-                .data = this
-            });
+        if(desc && strcmp(desc, "Equalizer PWF Sink") == 0) sink_id = id;
+        else {
+            const char* media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
+            if(media_class && strcmp(media_class, "Audio/Sink") == 0) {
+                nodes.insert_or_assign(id, PwNode {
+                    .info = nullptr,
+                    .data = this
+                });
 
-            pw_node *node = (pw_node *)pw_registry_bind(registry, id, PW_TYPE_INTERFACE_Node, version, 0);
-            pw_node_add_listener(node, &nodes[id].hook, &node_events, &nodes[id]);
+                pw_node *node = (pw_node *)pw_registry_bind(registry, id, PW_TYPE_INTERFACE_Node, version, 0);
+                pw_node_add_listener(node, &nodes[id].hook, &node_events, &nodes[id]);
+            }
+        }
+    }else if(strcmp(type, PW_TYPE_INTERFACE_Port) == 0) {
+        uint32_t node_id = 0;
+        uint32_t port_id = 0;
+        spa_dict_get_num(props, "node.id", node_id);
+        spa_dict_get_num(props, "port.id", port_id);
+        if(node_id == sink_id) {
+            if(filter_id != SPA_ID_INVALID && sink_id != SPA_ID_INVALID) {
+                pw_properties* link_props = pw_properties_new(nullptr, nullptr);
+                pw_properties_set(link_props, PW_KEY_LINK_OUTPUT_NODE, std::to_string(sink_id).c_str());
+                pw_properties_set(link_props, PW_KEY_LINK_OUTPUT_PORT, std::to_string(port_id).c_str());
+                pw_properties_set(link_props, PW_KEY_LINK_INPUT_NODE, std::to_string(filter_id).c_str());
+                pw_properties_set(link_props, PW_KEY_LINK_INPUT_PORT, std::to_string(port_id).c_str());
+
+                pw_core_create_object(
+                    core,
+                    "link-factory",
+                    PW_TYPE_INTERFACE_Link,
+                    PW_VERSION_LINK,
+                    &link_props->dict,
+                    0);
+            }
         }
     }
 }

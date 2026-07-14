@@ -7,6 +7,7 @@
 #include "pipewire/core.h"
 #include "pipewire/node.h"
 #include "pw_types.h"
+#include "spa/utils/defs.h"
 
 struct proxy_data {
     uint32_t id;
@@ -15,7 +16,8 @@ struct proxy_data {
 
 class Graph {
 public:
-    uint32_t filter_id = 0;
+    uint32_t filter_id = SPA_ID_INVALID;
+    uint32_t sink_id = SPA_ID_INVALID;
     bool filter_linked = false;
     struct pw_core *core = nullptr;
     struct pw_context *context = nullptr;

@@ -3,8 +3,10 @@
 #include "pipewire/filter.h"
 #include "pipewire/keys.h"
 #include "pipewire/link.h"
+#include "pipewire/node.h"
 #include "spa/utils/dict.h"
 #include <cmath>
+#include <iostream>
 
 Equalizer::Equalizer(Channel<Msg>* eq_ch, Channel<Msg>* ui_ch):
 eq_channel(eq_ch), ui_channel(ui_ch), graph() {
@@ -57,8 +59,12 @@ void Equalizer::on_process(void* userdata, struct spa_io_position *position) {
     eq->commands_mutex.unlock();
 }
 
+static void on_core_error (void *data, uint32_t id, int seq, int res, const char *message) {
+    std::cout << "Id: " << id << " Seq: " << seq << " Res: " << res << " Error msg: " << message << std::endl;
+}
+
 void Equalizer::loop() {
-    const struct spa_pod *params[1];
+    const struct spa_pod *params[2];
     uint32_t n_params = 0;
     uint8_t buffer[1024];
     struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
@@ -73,6 +79,11 @@ void Equalizer::loop() {
         .global_remove = registry_event_global_remove,
     };
 
+    static const struct pw_core_events core_events = {
+        .version = PW_VERSION_FILTER_EVENTS,
+        .error = on_core_error,
+    };
+
     context = pw_context_new(pw_main_loop_get_loop(main_loop), NULL, 0);
     core = pw_context_connect(context, NULL, 0);
     registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
@@ -81,9 +92,12 @@ void Equalizer::loop() {
     graph.registry = registry;
 
     struct spa_hook registry_listener;
+    struct spa_hook core_listener;
 
     spa_zero(registry_listener);
+    spa_zero(core_listener);
     pw_registry_add_listener(registry, &registry_listener, &registry_events, this);
+    pw_core_add_listener(core, &core_listener, &core_events, this);
 
     static const struct pw_filter_events filter_events = {
         .version = PW_VERSION_FILTER_EVENTS,
@@ -97,11 +111,8 @@ void Equalizer::loop() {
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, "Filter",
             PW_KEY_MEDIA_ROLE, "DSP",
-            PW_KEY_NODE_NAME, "Equalizer PWF",
+            PW_KEY_NODE_NAME, "equalizer-pwf-filter",
             PW_KEY_NODE_DESCRIPTION, "Equalizer PWF",
-            PW_KEY_NODE_AUTOCONNECT, "true",
-            PW_KEY_OBJECT_LINGER, "true",
-            "filter.smart", "true",
             NULL),
         &filter_events,
         this);
@@ -186,9 +197,23 @@ void Equalizer::loop() {
     timer = pw_loop_add_timer(pw_main_loop_get_loop(main_loop), &on_timeout, this);
     pw_loop_update_timer(pw_main_loop_get_loop(main_loop), timer, &timeout, &interval, false);
 
+    pw_properties* sink_props = pw_properties_new(nullptr, nullptr);
+    pw_properties_set(sink_props, PW_KEY_MEDIA_TYPE, "Audio");
+    pw_properties_set(sink_props, PW_KEY_NODE_NAME, "equalizer-pwf-sink");
+    pw_properties_set(sink_props, PW_KEY_NODE_DESCRIPTION, "Equalizer PWF Sink");
+    pw_properties_set(sink_props, PW_KEY_NODE_VIRTUAL, "true");
+    pw_properties_set(sink_props, PW_KEY_NODE_PASSIVE, "out");
+    pw_properties_set(sink_props, PW_KEY_MEDIA_CLASS, "Audio/Sink");
+    pw_properties_set(sink_props, "factory.name", "support.null-audio-sink");
+    pw_properties_set(sink_props, "audio.position", "[FL,FR]");
+
+    pw_proxy* sink_node = (pw_proxy*)pw_core_create_object(core, "adapter", PW_TYPE_INTERFACE_Node, PW_VERSION_NODE, &sink_props->dict, 0);
+
     /* and wait while we let things run */
     pw_main_loop_run(main_loop);
  
+    pw_core_destroy(core, sink_node);
+    pw_properties_free(sink_props);
     pw_proxy_destroy((struct pw_proxy*)registry);
     pw_core_disconnect(core);
     pw_context_destroy(context);
@@ -240,28 +265,6 @@ void Equalizer::registry_event_global(void *data, uint32_t id,
     const struct spa_dict *props) {
     if(id == SPA_ID_INVALID) return;
     static_cast<Equalizer*>(data)->on_global_reg_event(id, permissions, type, version, props);
-
-
-    //PwInfoMgr* mgr = static_cast<PwInfoMgr*>(data);
-    //mgr->global_registry_event(mgr, uint32_t id, uint32_t permissions, const char *type, uint32_t version, const struct spa_dict *props)
-    //printf("%s\n", type);
-    if(!strcmp(type, "PipeWire:Interface:Device")) {
-        bool found = false;
-        for(int i = 0; i < props->n_items; i++) {
-            if(!strcmp(props->items[i].key, "media.class") && !strcmp(props->items[i].value, "Audio/Device")) {
-                found = true;
-                break;
-            }
-        }
-        if(!found) return;
-        //audio_sink_info_mutex.lock();
-        //printf("object: id:%u type:%s/%d\n", id, type, version);
-        for(int i = 0; i < props->n_items; i++) {
-            //if(!strcmp(props->items[i].key, "device.description"))
-                //audio_sink_info.push_back(AudioSinkInfo(id, props->items[i].value));
-        }
-        //audio_sink_info_mutex.unlock();
-    }
 }
 
 void Equalizer::registry_event_global_remove(void *data, uint32_t id) {
