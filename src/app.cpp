@@ -492,7 +492,7 @@ float to_db(float m) {
 void App::update_response_samples() {
     for(int i = 0; i < sizeof(resp_samples)/sizeof(float); i++) {
         resp_samples[i] = 0.0;
-        resp_samples_x[i] = i * 4 + 1;
+        resp_samples_x[i] = i * 2 + 1;
     }
 
     for(const auto &command : commands) {
