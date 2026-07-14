@@ -88,6 +88,8 @@ public:
 
     void loop();
 
+    uint32_t filter_id;
+
     static void process(std::vector<FilterCommand> &commands, float* in, float* out, uint32_t n_samples);
 
     void on_global_reg_event(uint32_t id, uint32_t permissions, const char *type, uint32_t version, const struct spa_dict *props);

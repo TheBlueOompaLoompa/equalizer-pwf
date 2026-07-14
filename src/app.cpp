@@ -37,6 +37,22 @@ App::~App() {
 
 static float peak_gain = 0.0;
 
+static const double tick_nums[] = {
+    20, 30, 40, 50, 60, 70, 80, 90,
+    100, 200, 300, 400, 500, 600, 700, 800, 900,
+    1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000,
+    10000, 13000, 16000, 20000
+};
+
+static const int n_ticks = sizeof(tick_nums)/sizeof(double);
+
+static const char* const tick_labels[] = {
+    "20", "30", "40", "50", "60", "", "80", "",
+    "100", "200", "300", "400", "", "600", "", "800", "",
+    "1k", "2k", "3k", "4k", "5k", "6k", "", "8k", "",
+    "10k", "13k", "16k", "20k"
+};
+
 bool App::ui_render() {
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
@@ -61,11 +77,12 @@ bool App::ui_render() {
     }
 
     if(ImPlot::BeginPlot("Frequency Response", ImVec2(-1, 0), ImPlotFlags_NoLegend)) {
-        ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock);
-        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Linear);
+        ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_Lock | ImPlotAxisFlags_ShowMinorTickLabels, ImPlotAxisFlags_ShowMinorTickLabels);
+        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
         ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
-        ImPlot::SetupAxisLimits(ImAxis_X1, 1, 22000);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 10, 20000);
         ImPlot::SetupAxisLimits(ImAxis_Y1, -60, 20);
+        ImPlot::SetupAxisTicks(ImAxis_X1, tick_nums, n_ticks, tick_labels, false);
         ImPlotSpec spec;
         spec.Flags = ImPlotLineFlags_Shaded;
         ImPlot::PlotLine("Response", resp_samples_x, resp_samples, sizeof(resp_samples)/sizeof(float), spec);
@@ -81,6 +98,7 @@ bool App::ui_render() {
         ImGui::PushID(i);
         bool changed = false;
         add_filter_menu(i);
+        ImGui::Separator();
         switch(commands[i].type) {
         case FilterCommandType::PREAMP:
             ImGui::Text("Preamp");

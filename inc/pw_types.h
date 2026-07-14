@@ -1,4 +1,7 @@
 #pragma once
+#include "pipewire/link.h"
+#include "pipewire/node.h"
+#include "pipewire/port.h"
 #include <cstdint>
 #include <string>
 
@@ -12,7 +15,9 @@ struct PwClient {
 };
 
 struct PwNode {
-    uint32_t id;
+    pw_node_info* info;
+    void* data;
+    spa_hook hook;
 };
 
 enum PwPortDirection {
@@ -20,16 +25,19 @@ enum PwPortDirection {
     OUTPUT
 };
 
-struct PwPort {
-    uint32_t id = 0;
-    uint32_t port_id;
-    uint32_t node_id;
+enum PwAudioChannel {
+    FL,
+    FR
+};
 
-    std::string audio_channel;
-    std::string format_dsp;
-    PwPortDirection direction;
+struct PwPort {
+    pw_port_info* info;
+    void* data;
+    spa_hook hook;
 };
 
 struct PwLink {
-
+    pw_link_info* info;
+    void* data;
+    spa_hook hook;
 };

@@ -9,7 +9,7 @@
 #include "eq.h"
 
 namespace Config{
-static void parse_filter(std::istringstream &iss, std::vector<FilterCommand>& commands) {
+static void parse_filter(std::istringstream &iss, std::vector<FilterCommand>& commands, int id = -1) {
     std::string cmdlet;
     FilterCommandType type;
     while(iss >> cmdlet) {
@@ -42,14 +42,14 @@ static void parse_filter(std::istringstream &iss, std::vector<FilterCommand>& co
                 }
             });
         }else if(cmdlet.compare("PK") == 0) {
-            type = FilterCommandType::HIGH_SHELF;
+            type = FilterCommandType::PEAKING;
             commands.push_back({
                 .type = type,
                 .audio = {
                     .filter_l = Filter(),
                     .filter_r = Filter(),
                     .gain = 0.0,
-                    .shelf = {
+                    .peaking = {
                         .center_freq = 100,
                         .q = 10.0
                     }
@@ -93,6 +93,25 @@ static void parse_filter(std::istringstream &iss, std::vector<FilterCommand>& co
             iss >> commands[commands.size()-1].audio.gain;
         }
     }
+
+    auto &command = commands[commands.size()-1];
+    
+    switch(command.type) {
+    case FilterCommandType::LOW_SHELF:
+        command.audio.filter_l.lowShelfDbQ(command.audio.peaking.center_freq/44100.0, command.audio.gain, command.audio.shelf.q);
+        command.audio.filter_r.lowShelfDbQ(command.audio.peaking.center_freq/44100.0, command.audio.gain, command.audio.shelf.q);
+        break;
+    case FilterCommandType::HIGH_SHELF:
+        command.audio.filter_l.highShelfDbQ(command.audio.peaking.center_freq/44100.0, command.audio.gain, command.audio.shelf.q);
+        command.audio.filter_r.highShelfDbQ(command.audio.peaking.center_freq/44100.0, command.audio.gain, command.audio.shelf.q);
+        break;
+    case FilterCommandType::PEAKING:
+        command.audio.filter_l.peakDbQ(command.audio.peaking.center_freq/44100.0, command.audio.gain, command.audio.peaking.q);
+        command.audio.filter_r.peakDbQ(command.audio.peaking.center_freq/44100.0, command.audio.gain, command.audio.peaking.q);
+        break;
+    default:
+        std::cout << "Unhandled type " << command.type << " in filter parser filter setup." << std::endl;
+    }
 }
 
 static void deserialize_config(const char* path, std::vector<FilterCommand>& commands) {
@@ -111,6 +130,13 @@ static void deserialize_config(const char* path, std::vector<FilterCommand>& com
                 iss >> commands[commands.size()-1].audio.gain;
             }else if(cmdlet.compare("Filter:") == 0) {
                 parse_filter(iss, commands);
+            }else if(cmdlet.compare("Filter") == 0) {
+                std::string next;
+                iss >> next;
+                if(next.find(":") != std::string::npos) {
+                    int id = std::stoi(next.substr(0, next.size()-1));
+                    parse_filter(iss, commands, id);
+                }
             }
         }
     }

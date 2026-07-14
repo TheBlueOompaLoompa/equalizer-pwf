@@ -1,6 +1,9 @@
 #include "eq.h"
 #include "pipewire/core.h"
+#include "pipewire/filter.h"
 #include "pipewire/keys.h"
+#include "pipewire/link.h"
+#include "spa/utils/dict.h"
 #include <cmath>
 
 Equalizer::Equalizer(Channel<Msg>* eq_ch, Channel<Msg>* ui_ch):
@@ -59,7 +62,6 @@ void Equalizer::loop() {
     uint32_t n_params = 0;
     uint8_t buffer[1024];
     struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
- 
 
     pw_init(nullptr, nullptr);
 
@@ -74,6 +76,9 @@ void Equalizer::loop() {
     context = pw_context_new(pw_main_loop_get_loop(main_loop), NULL, 0);
     core = pw_context_connect(context, NULL, 0);
     registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
+    graph.context = context;
+    graph.core = core;
+    graph.registry = registry;
 
     struct spa_hook registry_listener;
 
@@ -214,6 +219,7 @@ void Equalizer::on_timeout(void* data, uint64_t expirations) {
     if(msg != nullptr) {
         switch(msg->type) {
         case MsgType::QUIT:
+            eq->graph.close();
             pw_main_loop_quit(eq->main_loop);
             break;
         case MsgType::DEVICE_LIST:
