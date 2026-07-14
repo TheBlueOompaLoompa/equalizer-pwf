@@ -1,4 +1,5 @@
 #include "eq.h"
+#include "pipewire/core.h"
 #include "pipewire/keys.h"
 #include <cmath>
 
@@ -91,7 +92,11 @@ void Equalizer::loop() {
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, "Filter",
             PW_KEY_MEDIA_ROLE, "DSP",
+            PW_KEY_NODE_NAME, "Equalizer PWF",
             PW_KEY_NODE_DESCRIPTION, "Equalizer PWF",
+            PW_KEY_NODE_AUTOCONNECT, "true",
+            PW_KEY_OBJECT_LINGER, "true",
+            "filter.smart", "true",
             NULL),
         &filter_events,
         this);

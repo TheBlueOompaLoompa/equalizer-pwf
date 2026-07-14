@@ -4,6 +4,7 @@
 #include "implot.h"
 #include "msg.h"
 #include "pw_types.h"
+#include "config.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,15 @@ App::App() {
     ui_channel = new Channel<Msg>();
 
     equalizer = new Equalizer(eq_channel, ui_channel);
+
+    config_path = std::string(getenv("HOME"));
+    config_path.append("/eq-config.txt");
+    
+    Config::deserialize_config(config_path.c_str(), commands);
+    for(const auto command : commands) {
+        equalizer->commands.push_back(command);
+    }
+    update_response_samples();
 
     App::instance = this;
     std::signal(SIGINT, sigint);
@@ -87,7 +97,7 @@ bool App::ui_render() {
             changed |= ImGui::SliderFloat("center", &commands[i].audio.peaking.center_freq, 1.0f, 22000.0f, "%f Hz", ImGuiSliderFlags_Logarithmic);
             if(!commands[i].audio.peaking.use_bandwith) {
                 if(ImGui::SliderFloat("Q Factor", &commands[i].audio.peaking.q, .333f, 33.333f)) {
-                    commands[i].audio.peaking.update_bandwith();
+                    commands[i].audio.peaking.update_bandwidth();
                     changed = true;
                 }
             }else {
@@ -127,6 +137,7 @@ bool App::ui_render() {
             equalizer->commands[i] = commands[i];
             equalizer->commands_mutex.unlock();
             update_response_samples();
+            Config::serialize_config(config_path.c_str(), commands);
         }
         if(ImGui::Button("Delete")) {
             commands.erase(commands.begin() + i);
@@ -134,6 +145,7 @@ bool App::ui_render() {
             equalizer->commands.erase(equalizer->commands.begin() + i);
             equalizer->commands_mutex.unlock();
             update_response_samples();
+            Config::serialize_config(config_path.c_str(), commands);
         }
         ImGui::PopID();
         ImGui::Separator();
@@ -217,7 +229,7 @@ void App::add_filter_menu(int pos) {
                         }
                     }
                 };
-                cmd.audio.peaking.update_bandwith();
+                cmd.audio.peaking.update_bandwidth();
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);

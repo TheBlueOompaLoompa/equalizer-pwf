@@ -40,7 +40,7 @@ struct PeakingConfig {
     float q;
     float bandwidth;
 
-    inline void update_bandwith() {
+    inline void update_bandwidth() {
         bandwidth = log2f(q + sqrtf(powf(q, 2.0) - 1.0));
     }
 

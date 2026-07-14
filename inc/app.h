@@ -53,6 +53,8 @@ private:
     float resp_samples[22000/2] = {0};
     float bad_resp_samples[22000/2] = {0};
 
+    std::string config_path;
+
     void ui_event_handler(SDL_Event &event);
 
     void ui_start();
