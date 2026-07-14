@@ -99,6 +99,18 @@ void Equalizer::loop() {
     pw_registry_add_listener(registry, &registry_listener, &registry_events, this);
     pw_core_add_listener(core, &core_listener, &core_events, this);
 
+    pw_properties* sink_props = pw_properties_new(nullptr, nullptr);
+    pw_properties_set(sink_props, PW_KEY_MEDIA_TYPE, "Audio");
+    pw_properties_set(sink_props, PW_KEY_NODE_NAME, "equalizer-pwf-sink");
+    pw_properties_set(sink_props, PW_KEY_NODE_DESCRIPTION, "Equalizer PWF Sink");
+    pw_properties_set(sink_props, PW_KEY_NODE_VIRTUAL, "true");
+    pw_properties_set(sink_props, PW_KEY_NODE_PASSIVE, "out");
+    pw_properties_set(sink_props, PW_KEY_MEDIA_CLASS, "Audio/Sink");
+    pw_properties_set(sink_props, "factory.name", "support.null-audio-sink");
+    pw_properties_set(sink_props, "audio.position", "[FL,FR]");
+
+    pw_proxy* sink_node = (pw_proxy*)pw_core_create_object(core, "adapter", PW_TYPE_INTERFACE_Node, PW_VERSION_NODE, &sink_props->dict, 0);
+
     static const struct pw_filter_events filter_events = {
         .version = PW_VERSION_FILTER_EVENTS,
         .process = on_process,
@@ -196,18 +208,6 @@ void Equalizer::loop() {
 
     timer = pw_loop_add_timer(pw_main_loop_get_loop(main_loop), &on_timeout, this);
     pw_loop_update_timer(pw_main_loop_get_loop(main_loop), timer, &timeout, &interval, false);
-
-    pw_properties* sink_props = pw_properties_new(nullptr, nullptr);
-    pw_properties_set(sink_props, PW_KEY_MEDIA_TYPE, "Audio");
-    pw_properties_set(sink_props, PW_KEY_NODE_NAME, "equalizer-pwf-sink");
-    pw_properties_set(sink_props, PW_KEY_NODE_DESCRIPTION, "Equalizer PWF Sink");
-    pw_properties_set(sink_props, PW_KEY_NODE_VIRTUAL, "true");
-    pw_properties_set(sink_props, PW_KEY_NODE_PASSIVE, "out");
-    pw_properties_set(sink_props, PW_KEY_MEDIA_CLASS, "Audio/Sink");
-    pw_properties_set(sink_props, "factory.name", "support.null-audio-sink");
-    pw_properties_set(sink_props, "audio.position", "[FL,FR]");
-
-    pw_proxy* sink_node = (pw_proxy*)pw_core_create_object(core, "adapter", PW_TYPE_INTERFACE_Node, PW_VERSION_NODE, &sink_props->dict, 0);
 
     /* and wait while we let things run */
     pw_main_loop_run(main_loop);
