@@ -56,7 +56,8 @@ static const char* const tick_labels[] = {
 bool App::ui_render() {
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-    ImGui::Begin("Main", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_MenuBar);
+    ImGui::Begin("Main", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_MenuBar);
 
     static std::string selected_name = "Default";
     if(ImGui::BeginCombo("###combo", selected_name.c_str())) {
@@ -77,7 +78,8 @@ bool App::ui_render() {
     }
 
     if(ImPlot::BeginPlot("Frequency Response", ImVec2(-1, 0), ImPlotFlags_NoLegend)) {
-        ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)", ImPlotAxisFlags_Lock | ImPlotAxisFlags_ShowMinorTickLabels, ImPlotAxisFlags_ShowMinorTickLabels);
+        ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)",
+                ImPlotAxisFlags_Lock | ImPlotAxisFlags_ShowMinorTickLabels, ImPlotAxisFlags_ShowMinorTickLabels);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
         ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Linear);
         ImPlot::SetupAxisLimits(ImAxis_X1, 10, 20000);
@@ -85,9 +87,11 @@ bool App::ui_render() {
         ImPlot::SetupAxisTicks(ImAxis_X1, tick_nums, n_ticks, tick_labels, false);
         ImPlotSpec spec;
         spec.Flags = ImPlotLineFlags_Shaded;
-        ImPlot::PlotLine("Response", resp_samples_x, resp_samples, sizeof(resp_samples)/sizeof(float), spec);
+        ImPlot::PlotLine("Response", resp_samples_x, resp_samples,
+                            sizeof(resp_samples)/sizeof(float), spec);
         spec.LineColor = ImVec4(193.0/255.0, 114.0/255.0, 144.0/255.0, 1.0);
-        ImPlot::PlotLine("Peaking Response", resp_samples_x, bad_resp_samples, sizeof(resp_samples)/sizeof(float), spec);
+        ImPlot::PlotLine("Peaking Response", resp_samples_x, bad_resp_samples,
+                            sizeof(resp_samples)/sizeof(float), spec);
         ImPlot::EndPlot();
     }
     ImGui::Text("Peak gain: %f dB", peak_gain);
@@ -207,7 +211,7 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .shelf = {
                             .center_freq = 100,
-                            .q = 10.0
+                            .q = 0.9
                         }
                     }
                 };
@@ -225,7 +229,7 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .shelf = {
                             .center_freq = 10000,
-                            .q = 10.0
+                            .q = 0.9
                         }
                     }
                 };
