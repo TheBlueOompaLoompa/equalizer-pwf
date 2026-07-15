@@ -5,6 +5,7 @@
 #include "msg.h"
 #include "pw_types.h"
 #include "config.h"
+#include <SDL3/SDL_hints.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -211,7 +212,7 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .shelf = {
                             .center_freq = 100,
-                            .q = 0.9
+                            .q = 0.7
                         }
                     }
                 };
@@ -229,7 +230,7 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .shelf = {
                             .center_freq = 10000,
-                            .q = 0.9
+                            .q = 0.7
                         }
                     }
                 };
@@ -280,6 +281,10 @@ void quit_callback(void* app, SDL_TrayEntry* _entry) {
 
 void App::ui_start() {
     last_hide_window = true;
+
+    SDL_SetHint(SDL_HINT_APP_ID, "org.bloompa.EqualizerPWF");
+    SDL_SetHint(SDL_HINT_APP_NAME, "Equalizer PWF");
+
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         printf("Error: SDL_Init(): %s\n", SDL_GetError());
         return;

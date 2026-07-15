@@ -7,3 +7,6 @@
 [submodule "implot"]
 	path = implot
 	url = https://github.com/TheBlueOompaLoompa/implot.git
+[submodule "SDL"]
+	path = SDL
+	url = https://github.com/libsdl-org/SDL.git

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Equalizer PWF
+Comment=Parametric equalizer for PipeWire
+Exec=equalizer-pwf
+Icon=org.bloompa.EqualizerPWF
+Terminal=false
+Categories=Audio;
