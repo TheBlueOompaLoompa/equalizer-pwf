@@ -22,23 +22,30 @@ using FilterDesign = signalsmith::filters::BiquadDesign;
 
 struct Port;
 
-enum FilterCommandType {
+enum CommandType {
     PREAMP,
     PEAKING,
     LOW_SHELF,
     HIGH_SHELF,
+    CHANNEL,
 };
 
-struct ShelfConfig {
-    float center_freq;
-    float q;
+enum ShelfShaper {
+    Q,
+    FIXED_S,
+    SLOPE,
 };
 
-struct PeakingConfig {
+struct AudioFilterConfig {
+    float gain;
+
     float center_freq;
     bool use_bandwith;
+    ShelfShaper shaper;
     float q;
     float bandwidth;
+
+    std::vector<Filter>* filters = nullptr;
 
     inline void update_bandwidth() {
         bandwidth = log2f(q + sqrtf(powf(q, 2.0) - 1.0));
@@ -49,20 +56,11 @@ struct PeakingConfig {
     }
 };
 
-struct AudioFilterConfig {
-    Filter filter_l;
-    Filter filter_r;
-    float gain;
-    union {
-        PeakingConfig peaking;
-        ShelfConfig shelf;
-    };
-};
-
-struct FilterCommand {
-    FilterCommandType type;
+struct Command {
+    CommandType type;
     union {
         AudioFilterConfig audio;
+        int channel;
     };
 };
 
@@ -78,7 +76,7 @@ public:
     Channel<Msg>* eq_channel;
     Channel<Msg>* ui_channel;
 
-    std::vector<FilterCommand> commands;
+    std::vector<Command> commands;
     std::mutex commands_mutex;
 
     Graph graph;
@@ -90,7 +88,7 @@ public:
 
     uint32_t filter_id;
 
-    static void process(std::vector<FilterCommand> &commands, float* in, float* out, uint32_t n_samples);
+    static void process(std::vector<Command> &commands, float* in, float* out, uint32_t n_samples, int channel);
 
     void on_global_reg_event(uint32_t id, uint32_t permissions, const char *type, uint32_t version, const struct spa_dict *props);
     void on_global_reg_remove_event(uint32_t id);

@@ -1,15 +1,16 @@
 #include "app.h"
+#include "SDL3/SDL_error.h"
 #include "eq.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "implot.h"
 #include "msg.h"
 #include "pw_types.h"
 #include "config.h"
 #include <SDL3/SDL_hints.h>
+#include <SDL3/SDL_surface.h>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <unordered_map>
 
 App::App() {
     ui_done = false;
@@ -61,7 +62,11 @@ bool App::ui_render() {
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_MenuBar);
 
     static std::string selected_name = "Default";
-    if(ImGui::BeginCombo("###combo", selected_name.c_str())) {
+    ImGui::Columns(2, nullptr, false);
+    ImGui::Text("Device:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    if(ImGui::BeginCombo("###devices", selected_name.c_str())) {
         /*if(audio_sink_info_mutex.try_lock()) {
             for(int i = 0; i < audio_sink_info.size(); i++) {
                 if(ImGui::Selectable(audio_sink_info[i].name.c_str(), false)) {
@@ -77,7 +82,24 @@ bool App::ui_render() {
         }
         ImGui::EndCombo();
     }
+    ImGui::NextColumn();
+    ImGui::Text("Channel configuration:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    if(ImGui::BeginCombo("###channelconfig", "67.1 Surround")) {
+        ImGui::EndCombo();
+    }
+    ImGui::EndColumns();
 
+    ImGui::Columns(2, nullptr, false);
+    ImGui::SetColumnWidth(0, ImGui::CalcTextSize("Channels: Abc").x + 80.0);
+    ImGui::Text("Channels:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::CalcTextSize("Abc").x + 50.0);
+    if(ImGui::BeginCombo("###channels", "L")) {
+        ImGui::EndCombo();
+    }
+    ImGui::NextColumn();
     if(ImPlot::BeginPlot("Frequency Response", ImVec2(-1, 0), ImPlotFlags_NoLegend)) {
         ImPlot::SetupAxes("Frequency (Hz)", "Gain (dB)",
                 ImPlotAxisFlags_Lock | ImPlotAxisFlags_ShowMinorTickLabels, ImPlotAxisFlags_ShowMinorTickLabels);
@@ -87,72 +109,37 @@ bool App::ui_render() {
         ImPlot::SetupAxisLimits(ImAxis_Y1, -60, 20);
         ImPlot::SetupAxisTicks(ImAxis_X1, tick_nums, n_ticks, tick_labels, false);
         ImPlotSpec spec;
-        spec.Flags = ImPlotLineFlags_Shaded;
         ImPlot::PlotLine("Response", resp_samples_x, resp_samples,
                             sizeof(resp_samples)/sizeof(float), spec);
         spec.LineColor = ImVec4(193.0/255.0, 114.0/255.0, 144.0/255.0, 1.0);
+        spec.Flags = ImPlotLineFlags_Shaded;
         ImPlot::PlotLine("Peaking Response", resp_samples_x, bad_resp_samples,
                             sizeof(resp_samples)/sizeof(float), spec);
         ImPlot::EndPlot();
     }
+    ImGui::EndColumns();
     ImGui::Text("Peak gain: %f dB", peak_gain);
 
     ImGui::BeginListBox("##Commands", ImVec2(-1.0, -1.0));
 
+    bool combo = false;
     for(int i = 0; i < commands.size(); i++) {
         ImGui::PushID(i);
         bool changed = false;
         add_filter_menu(i);
         ImGui::Separator();
         switch(commands[i].type) {
-        case FilterCommandType::PREAMP:
-            ImGui::Text("Preamp");
-            changed |= ImGui::SliderFloat("gain", &commands[i].audio.gain, -20.0f, 20.0f, "%f dB");
-            ImGui::SameLine();
-            if(ImGui::Button("Level to peak gain")) {
-                commands[i].audio.gain -= peak_gain;
-                changed = true;
-            }
+        case CommandType::PREAMP:
+            changed = rack_preamp(commands[i]);
             break;
-        case FilterCommandType::PEAKING:
-            ImGui::Text("Peaking");
-            changed |= ImGui::SliderFloat("gain", &commands[i].audio.gain, -20.0f, 20.0f, "%f dB");
-            changed |= ImGui::SliderFloat("center", &commands[i].audio.peaking.center_freq, 1.0f, 22000.0f, "%f Hz", ImGuiSliderFlags_Logarithmic);
-            if(!commands[i].audio.peaking.use_bandwith) {
-                if(ImGui::SliderFloat("Q Factor", &commands[i].audio.peaking.q, .333f, 33.333f)) {
-                    commands[i].audio.peaking.update_bandwidth();
-                    changed = true;
-                }
-            }else {
-                if(ImGui::SliderFloat("oct Bandwith", &commands[i].audio.peaking.bandwidth, -20.0f, 20.0f)) {
-                    commands[i].audio.peaking.update_q();
-                    changed = true;
-                }
-            }
-            if(changed) {
-                commands[i].audio.filter_l.peakDbQ(commands[i].audio.peaking.center_freq/44100.0, commands[i].audio.gain, commands[i].audio.peaking.q);
-                commands[i].audio.filter_r.peakDbQ(commands[i].audio.peaking.center_freq/44100.0, commands[i].audio.gain, commands[i].audio.peaking.q);
-            }
+        case CommandType::PEAKING:
+            changed = rack_pk(commands[i]);
             break;
-        case FilterCommandType::LOW_SHELF:
-            ImGui::Text("Low Shelf");
-            changed |= ImGui::SliderFloat("gain", &commands[i].audio.gain, -20.0f, 20.0f, "%f dB");
-            changed |= ImGui::SliderFloat("center", &commands[i].audio.shelf.center_freq, 1.0f, 22000.0f, "%f Hz", ImGuiSliderFlags_Logarithmic);
-            changed |= ImGui::SliderFloat("Q Factor", &commands[i].audio.shelf.q, .333f, 33.333f);
-            if(changed) {
-                commands[i].audio.filter_l.lowShelfDbQ(commands[i].audio.peaking.center_freq/44100.0, commands[i].audio.gain, commands[i].audio.shelf.q);
-                commands[i].audio.filter_r.lowShelfDbQ(commands[i].audio.peaking.center_freq/44100.0, commands[i].audio.gain, commands[i].audio.shelf.q);
-            }
+        case CommandType::LOW_SHELF:
+            changed = rack_shelf(commands[i], true);
             break;
-        case FilterCommandType::HIGH_SHELF:
-            ImGui::Text("High Shelf");
-            changed |= ImGui::SliderFloat("gain", &commands[i].audio.gain, -20.0f, 20.0f, "%f dB");
-            changed |= ImGui::SliderFloat("center", &commands[i].audio.shelf.center_freq, 1.0f, 22000.0f, "%f Hz", ImGuiSliderFlags_Logarithmic);
-            changed |= ImGui::SliderFloat("Q Factor", &commands[i].audio.shelf.q, .333f, 33.333f);
-            if(changed) {
-                commands[i].audio.filter_l.highShelfDbQ(commands[i].audio.peaking.center_freq/44100.0, commands[i].audio.gain, commands[i].audio.shelf.q);
-                commands[i].audio.filter_r.highShelfDbQ(commands[i].audio.peaking.center_freq/44100.0, commands[i].audio.gain, commands[i].audio.shelf.q);
-            }
+        case CommandType::HIGH_SHELF:
+            changed = rack_shelf(commands[i], false);
             break;
         }
         if(changed) {
@@ -183,15 +170,104 @@ bool App::ui_render() {
     return true;
 }
 
+#define GAIN_INPUT ImGui::DragFloat("gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
+#define CENTER_FREQ changed |= ImGui::DragFloat("center", &command.audio.center_freq, 12.0f, 1.0f, 22000.0f, "%.2f Hz", ImGuiSliderFlags_Logarithmic)
+#define QFAC ImGui::DragFloat("Q Factor", &command.audio.q, .1, .333f, 33.333f)
+#define BANDWIDTH ImGui::DragFloat("oct Bandwith", &command.audio.bandwidth, .1, .01f, 20.0f)
+#define FIXED_S_CALC float A = powf(10.0, command.audio.gain/40.0); \
+                command.audio.q = 1.0/sqrtf((A + 1.0/A)*(1.0/.9-1.0)+2.0);
+
+bool App::rack_preamp(Command& command) {
+    bool changed = false;
+    ImGui::Text("Preamp");
+    changed = GAIN_INPUT;
+    ImGui::SameLine();
+    if(ImGui::Button("Level to peak gain")) {
+        command.audio.gain -= peak_gain;
+        changed = true;
+    }
+
+    return changed;
+}
+
+bool App::rack_pk(Command& command) {
+    bool changed = false;
+    ImGui::Text("Peaking");
+    GAIN_INPUT;
+    CENTER_FREQ;
+    if(!command.audio.use_bandwith) {
+        if(QFAC) {
+            command.audio.update_bandwidth();
+            changed = true;
+        }
+    }else {
+        if(BANDWIDTH) {
+            command.audio.update_q();
+            changed = true;
+        }
+    }
+    if(changed) {
+        for(auto &filter : *command.audio.filters)
+            filter.peakDbQ(command.audio.center_freq/44100.0, command.audio.gain, command.audio.q);
+    }
+
+    return changed;
+}
+
+bool App::rack_shelf(Command& command, bool is_low) {
+    bool changed = false;
+    if(is_low) ImGui::Text("Low Shelf");
+    else ImGui::Text("High Shelf");
+    GAIN_INPUT;
+    CENTER_FREQ;
+    bool combo = false;
+    switch(command.audio.shaper) {
+    case ShelfShaper::Q:
+        combo = ImGui::BeginCombo("Shaper", "Q Factor");
+        break;
+    case ShelfShaper::FIXED_S:
+        combo = ImGui::BeginCombo("Shaper", "Fixed S");
+        break;
+    case ShelfShaper::SLOPE:
+        combo = ImGui::BeginCombo("Shaper", "Slope");
+        break;
+    }
+    if(combo) {
+        if(ImGui::Selectable("Q", command.audio.shaper == ShelfShaper::Q)) {
+            command.audio.shaper = ShelfShaper::Q;
+            changed = true;
+        }else if(ImGui::Selectable("Fixed S", command.audio.shaper == ShelfShaper::FIXED_S)) {
+            command.audio.shaper = ShelfShaper::FIXED_S;
+            changed = true;
+        }
+        ImGui::EndCombo();
+    }
+
+    if(command.audio.shaper == ShelfShaper::Q) {
+        changed |= QFAC;
+    }
+
+    if(changed) {
+        if(command.audio.shaper == ShelfShaper::FIXED_S) { FIXED_S_CALC }
+        if(is_low) {
+            for(auto &filter : *command.audio.filters)
+                filter.lowShelfDbQ(command.audio.center_freq/44100.0, command.audio.gain, command.audio.q);
+        }else {
+            for(auto &filter : *command.audio.filters)
+                filter.highShelfDbQ(command.audio.center_freq/44100.0, command.audio.gain, command.audio.q);
+        }
+    }
+
+    return changed;
+}
+
 void App::add_filter_menu(int pos) {
     if(ImGui::BeginMenu("Add Filter Command")) {
         if(ImGui::BeginMenu("Basic Filters")) {
             if (ImGui::MenuItem("Preamp"))   {
-                FilterCommand cmd = {
-                    .type = FilterCommandType::PREAMP,
+                Command cmd = {
+                    .type = CommandType::PREAMP,
                     .audio = {
-                        .filter_l = Filter(),
-                        .filter_r = Filter(),
                         .gain = 0
                     }
                 };
@@ -204,16 +280,13 @@ void App::add_filter_menu(int pos) {
         }
         if(ImGui::BeginMenu("Parametric Filters")) {
             if (ImGui::MenuItem("Low Shelf Filter"))   {
-                FilterCommand cmd = {
-                    .type = FilterCommandType::LOW_SHELF,
+                Command cmd = {
+                    .type = CommandType::LOW_SHELF,
                     .audio = {
-                        .filter_l = Filter(),
-                        .filter_r = Filter(),
                         .gain = 0.0,
-                        .shelf = {
-                            .center_freq = 100,
-                            .q = 0.7
-                        }
+                        .center_freq = 100,
+                        .q = 0.7,
+                        .filters = new std::vector<Filter>()
                     }
                 };
                 commands.insert(commands.begin() + pos, cmd);
@@ -222,16 +295,13 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.unlock();
             }
             if (ImGui::MenuItem("High Shelf Filter"))   {
-                FilterCommand cmd = {
-                    .type = FilterCommandType::HIGH_SHELF,
+                Command cmd = {
+                    .type = CommandType::HIGH_SHELF,
                     .audio = {
-                        .filter_l = Filter(),
-                        .filter_r = Filter(),
                         .gain = 0.0,
-                        .shelf = {
-                            .center_freq = 10000,
-                            .q = 0.7
-                        }
+                        .center_freq = 10000,
+                        .q = 0.7,
+                        .filters = new std::vector<Filter>()
                     }
                 };
                 commands.insert(commands.begin() + pos, cmd);
@@ -240,19 +310,16 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.unlock();
             }
             if (ImGui::MenuItem("Peaking Filter"))   {
-                FilterCommand cmd = {
-                    .type = FilterCommandType::PEAKING,
+                Command cmd = {
+                    .type = CommandType::PEAKING,
                     .audio = {
-                        .filter_l = Filter(),
-                        .filter_r = Filter(),
                         .gain = 0.0,
-                        .peaking = PeakingConfig {
-                            .center_freq = 100,
-                            .q = 10.0
-                        }
+                        .center_freq = 100,
+                        .q = 10.0,
+                        .filters = new std::vector<Filter>()
                     }
                 };
-                cmd.audio.peaking.update_bandwidth();
+                cmd.audio.update_bandwidth();
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
@@ -271,13 +338,16 @@ int App::loop() {
     return 0;
 }
 
-void show_window_callback(void* app, SDL_TrayEntry* _entry) {
-    static_cast<App*>(app)->hide_window = false;
+void toggle_window_callback(void* app, SDL_TrayEntry* _entry) {
+    static_cast<App*>(app)->hide_window = !static_cast<App*>(app)->hide_window;
 }
 
 void quit_callback(void* app, SDL_TrayEntry* _entry) {
     static_cast<App*>(app)->quit();
 }
+
+static bool tray_created = false;
+static SDL_Surface* tray_icon_surface = nullptr;
 
 void App::ui_start() {
     last_hide_window = true;
@@ -290,12 +360,11 @@ void App::ui_start() {
         return;
     }
 
-    tray = SDL_CreateTray(NULL, "Equalizer PWF");
-    menu = SDL_CreateTrayMenu(tray);
-    entry[0] = SDL_InsertTrayEntryAt(menu, 0, "Show Window", SDL_TRAYENTRY_BUTTON);
-    SDL_SetTrayEntryCallback(entry[0], show_window_callback, this);
-    entry[1] = SDL_InsertTrayEntryAt(menu, 1, "Quit", SDL_TRAYENTRY_BUTTON);
-    SDL_SetTrayEntryCallback(entry[1], quit_callback, this);
+#ifdef FLATPAK
+    tray_icon_surface = SDL_LoadSurface("/app/share/icons/hicolor/128x128/apps/org.bloompa.EqualizerPWF.png");
+#else
+    tray_icon_surface = SDL_LoadSurface("equalizer-pwf-tray.png");
+#endif
 
     // Create SDL window graphics context
     float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
@@ -348,23 +417,14 @@ void App::ui_start() {
     init_info.PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
     ImGui_ImplSDLGPU3_Init(&init_info);
 
-    // Load Fonts
-    // - If fonts are not explicitly loaded, Dear ImGui will select an embedded font: either AddFontDefaultVector() or AddFontDefaultBitmap().
-    //   This selection is based on (style.FontSizeBase * style.FontScaleMain * style.FontScaleDpi) reaching a small threshold.
-    // - You can load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-    // - If a file cannot be loaded, AddFont functions will return a nullptr. Please handle those errors in your code (e.g. use an assertion, display an error and quit).
-    // - Read 'docs/FONTS.md' for more instructions and details.
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use FreeType for higher quality font rendering.
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    //style.FontSizeBase = 20.0f;
     io.Fonts->AddFontDefaultVector();
-    //io.Fonts->AddFontDefaultBitmap();
-    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
-    //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
-    //IM_ASSERT(font != nullptr);
+
+    tray = SDL_CreateTray(tray_icon_surface, "Equalizer PWF");
+    menu = SDL_CreateTrayMenu(tray);
+    entry[0] = SDL_InsertTrayEntryAt(menu, 0, "Show/Hide Window", SDL_TRAYENTRY_BUTTON);
+    SDL_SetTrayEntryCallback(entry[0], toggle_window_callback, this);
+    entry[1] = SDL_InsertTrayEntryAt(menu, -1, "Quit", SDL_TRAYENTRY_BUTTON);
+    SDL_SetTrayEntryCallback(entry[1], quit_callback, this);
 
     while(!ui_done)
         ui_loop();
@@ -480,13 +540,15 @@ void App::ui_loop() {
 void App::ui_end() {
     // Cleanup
     // [If using SDL_MAIN_USE_CALLBACKS: all code below would likely be your SDL_AppQuit() function]
+    SDL_DestroyTray(tray);
+    SDL_DestroySurface(tray_icon_surface);
+
     SDL_WaitForGPUIdle(gpu_device);
     ImGui_ImplSDL3_Shutdown();
     ImGui_ImplSDLGPU3_Shutdown();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
-    //SDL_DestroyTray(tray);
     SDL_ReleaseWindowFromGPUDevice(gpu_device, window);
     SDL_DestroyGPUDevice(gpu_device);
     SDL_DestroyWindow(window);
@@ -508,14 +570,15 @@ void App::update_response_samples() {
         for(int i = 0; i < sizeof(resp_samples)/sizeof(float); i++) {
             int fq = i*2 + 1;
             switch(command.type) {
-            case FilterCommandType::PREAMP:
+            case CommandType::PREAMP:
                 {
                     float gain_linear = GAIN(command.audio.gain);
                     resp_samples[i] += 20.0f * log10f(fmaxf(gain_linear, 1e-9f));
                 }
                 break;
             default:
-                resp_samples[i] += command.audio.filter_l.responseDb((float)fq/44100.0);
+                if(command.audio.filters != nullptr && command.audio.filters->size() > 0)
+                    resp_samples[i] += (*command.audio.filters)[0].responseDb((float)fq/44100.0);
                 break;
             }
         }

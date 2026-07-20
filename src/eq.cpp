@@ -19,12 +19,15 @@ Equalizer::~Equalizer() {
 
 static bool channel = false;
 
-void Equalizer::process(std::vector<FilterCommand> &commands, float* in, float* out, uint32_t n_samples) {
+void Equalizer::process(std::vector<Command> &commands, float* in, float* out, uint32_t n_samples, int channel) {
     memcpy(out, in, n_samples*sizeof(float));
+
+    int command_channel = channel; // Last recorded channel command
     for(auto &command : commands) {
         switch(command.type) {
-        case FilterCommandType::PREAMP:
+        case CommandType::PREAMP:
             {
+                if(command_channel != channel) continue;
                 float gain = GAIN(command.audio.gain);
                 for(int i = 0; i < n_samples; i++) {
                     out[i] = in[i] * gain;
@@ -34,8 +37,8 @@ void Equalizer::process(std::vector<FilterCommand> &commands, float* in, float* 
             break;
         default:
             for(int i = 0; i < n_samples; i++) {
-                if(channel) out[i] = command.audio.filter_l(in[i]);
-                else out[i] = command.audio.filter_r(in[i]);
+                if(channel) out[i] = (*command.audio.filters)[channel](in[i]);
+                else out[i] = (*command.audio.filters)[channel](in[i]);
             }
             memcpy(in, out, n_samples*sizeof(float));
             break;
@@ -53,7 +56,7 @@ void Equalizer::on_process(void* userdata, struct spa_io_position *position) {
         out = static_cast<float*>(pw_filter_get_dsp_buffer(eq->filter_outputs[i], n_samples));
         if (in == nullptr || out == nullptr)
             continue;
-        process(eq->commands, in, out, n_samples);
+        process(eq->commands, in, out, n_samples, i);
         channel = !channel;
     }
     eq->commands_mutex.unlock();

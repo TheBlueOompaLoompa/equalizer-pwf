@@ -11,6 +11,7 @@ set(DSP_DIR ${PROJECT_SOURCE_DIR}/dsp)
 file(COPY org.bloompa.EqualizerPWF.yml DESTINATION .)
 file(COPY equalizer-pwf.desktop DESTINATION .)
 file(COPY equalizer-pwf.svg DESTINATION .)
+file(COPY equalizer-pwf-tray.png DESTINATION .)
 
 # Includes
 include_directories(${PROJECT_SOURCE_DIR})
@@ -34,7 +35,13 @@ add_subdirectory(SDL EXCLUDE_FROM_ALL)
 find_package(PkgConfig QUIET REQUIRED)
 pkg_check_modules(PipeWire REQUIRED IMPORTED_TARGET libpipewire-0.3)
 
+option(FLATPAK "Flatpak compilation" OFF)
+
 add_executable(equalizer-pwf ${SOURCES} ${IMGUI_SOURCES} ${IMPLOT_SOURCES})
+
+if(FLATPAK)
+    target_compile_definitions(equalizer-pwf PRIVATE FLATPAK)
+endif()
 
 target_link_libraries(equalizer-pwf PRIVATE PkgConfig::PipeWire)
 target_link_libraries(equalizer-pwf PRIVATE SDL3::SDL3)
@@ -44,3 +51,16 @@ target_include_directories(equalizer-pwf PUBLIC ${PROJECT_SOURCE_DIR}/inc)
 install(
   TARGETS equalizer-pwf
 )
+
+add_custom_target(run
+    COMMAND ./equalizer-pwf
+    DEPENDS equalizer-pwf 
+    WORKING_DIRECTORY ${CMAKE_PROJECT_DIR}
+)
+
+add_custom_target(debug
+    COMMAND gdb ./equalizer-pwf
+    DEPENDS equalizer-pwf 
+    WORKING_DIRECTORY ${CMAKE_PROJECT_DIR}
+)
+

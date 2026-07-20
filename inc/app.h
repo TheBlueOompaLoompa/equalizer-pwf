@@ -47,7 +47,7 @@ private:
     Equalizer* equalizer = nullptr;
 
     std::vector<PwDevice> devices;
-    std::vector<FilterCommand> commands;
+    std::vector<Command> commands;
 
     float resp_samples_x[22000/2] = {0};
     float resp_samples[22000/2] = {0};
@@ -61,6 +61,14 @@ private:
     void ui_end();
     void ui_loop();
     bool ui_render();
+
+    bool rack_preamp(Command& command);
+    bool rack_pk(Command& command);
+    bool rack_lp(Command& command);
+    bool rack_hp(Command& command);
+    bool rack_bp(Command& command);
+    bool rack_shelf(Command& command, bool is_low);
+    bool rack_ap(Command& command);
 
     void update_response_samples();
 

@@ -2,6 +2,7 @@
 #include <cstring>
 #include <iostream>
 #include <pipewire/keys.h>
+#include <pipewire/port.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -102,11 +103,17 @@ static void on_link_info(void *data, const struct pw_link_info *info) {
     }
 }
 
+static void on_port_info(void *data, const struct pw_port_info *info) {
+    PwPort* port = static_cast<PwPort*>(data);
+    Graph* graph = static_cast<Graph*>(port->data);
+    port->info = (pw_port_info*)info;
+}
+
 static void on_node_info(void *data, const struct pw_node_info *info) {
     PwNode* node = static_cast<PwNode*>(data);
     Graph* graph = static_cast<Graph*>(node->data);
 
-    graph->nodes[info->id].info = (pw_node_info*)info;
+    node->info = (pw_node_info*)info;
     const char* name = spa_dict_lookup(info->props, PW_KEY_NODE_NAME);
     if(!name) return;
     if(strcmp(name, "equalizer-pwf-sink") == 0) {
@@ -114,12 +121,16 @@ static void on_node_info(void *data, const struct pw_node_info *info) {
     }else if(strcmp(name, "equalizer-pwf-filter") == 0) {
         graph->filter_id = info->id;
     }
-    
 }
 
 static const pw_link_events link_events = {
     .version = PW_VERSION_LINK_EVENTS,
     .info = on_link_info
+};
+
+static const pw_port_events port_events = {
+    .version = PW_VERSION_PORT_EVENTS,
+    .info = on_port_info
 };
 
 static const pw_node_events node_events = {
@@ -147,11 +158,18 @@ void Graph::on_global_reg_event(uint32_t id, uint32_t permissions, const char *t
                     .data = this
                 });
 
-                pw_node *node = (pw_node *)pw_registry_bind(registry, id, PW_TYPE_INTERFACE_Node, version, 0);
+                pw_node* node = (pw_node*)pw_registry_bind(registry, id, PW_TYPE_INTERFACE_Node, version, 0);
                 pw_node_add_listener(node, &nodes[id].hook, &node_events, &nodes[id]);
             }
         }
     }else if(strcmp(type, PW_TYPE_INTERFACE_Port) == 0) {
+        ports.insert_or_assign(id, PwPort {
+            .info = nullptr,
+            .data = this
+        });
+        pw_port* port = (pw_port*)pw_registry_bind(registry, id, PW_TYPE_INTERFACE_Port, version, 0);
+        pw_port_add_listener(port, &ports[id].hook, &port_events, &ports[id]);
+
         uint32_t node_id = 0;
         uint32_t port_id = 0;
         spa_dict_get_num(props, "node.id", node_id);
