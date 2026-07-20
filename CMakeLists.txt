@@ -34,6 +34,7 @@ add_subdirectory(SDL EXCLUDE_FROM_ALL)
 
 find_package(PkgConfig QUIET REQUIRED)
 pkg_check_modules(PipeWire REQUIRED IMPORTED_TARGET libpipewire-0.3)
+pkg_check_modules(WirePlumber REQUIRED IMPORTED_TARGET wireplumber-0.5)
 
 option(FLATPAK "Flatpak compilation" OFF)
 
@@ -44,6 +45,7 @@ if(FLATPAK)
 endif()
 
 target_link_libraries(equalizer-pwf PRIVATE PkgConfig::PipeWire)
+target_link_libraries(equalizer-pwf PRIVATE PkgConfig::WirePlumber)
 target_link_libraries(equalizer-pwf PRIVATE SDL3::SDL3)
 
 target_include_directories(equalizer-pwf PUBLIC ${PROJECT_SOURCE_DIR}/inc)
