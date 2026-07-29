@@ -1,4 +1,6 @@
 #include "util.h" 
+#include <wp/core.h>
+#include <wp/node.h>
 
 std::vector<WpPort*> Util::get_node_ports(WpObjectManager *om, WpNode *node, WpDirection direction) {
     std::vector<WpPort*> ports;
@@ -18,4 +20,17 @@ std::vector<WpPort*> Util::get_node_ports(WpObjectManager *om, WpNode *node, WpD
     }
 
     return ports;
+}
+
+void Util::get_linked_objects(WpObjectManager* om, WpLink* link, WpNode** input, WpNode** output) {
+    guint32 output_node, output_port, input_node, input_port;
+    wp_link_get_linked_object_ids(link, &output_node, &output_port, &input_node, &input_port);
+    *input = WP_NODE(wp_object_manager_lookup(om, WP_TYPE_NODE,
+        WP_CONSTRAINT_TYPE_G_PROPERTY, "bound-id",
+        "=u", input_node,
+        NULL));
+    *output = WP_NODE(wp_object_manager_lookup(om, WP_TYPE_NODE,
+        WP_CONSTRAINT_TYPE_G_PROPERTY, "bound-id",
+        "=u", input_node,
+        NULL));
 }

@@ -24,15 +24,13 @@ void on_process(void* userdata, struct spa_io_position *position) {
     FilterChain* chain = static_cast<FilterChain*>(userdata);
     uint32_t n_samples = position->clock.duration;
 
-    int i = 0;
     for(auto& channel : chain->input_ports) {
         float *in, *out;
         in = static_cast<float*>(pw_filter_get_dsp_buffer(channel.second, n_samples));
-        out = static_cast<float*>(pw_filter_get_dsp_buffer(channel.second, n_samples));
+        out = static_cast<float*>(pw_filter_get_dsp_buffer(chain->output_ports[channel.first], n_samples));
         if (in == nullptr || out == nullptr)
             continue;
-        chain->process(in, out, n_samples, i);
-        i++;
+        chain->process(in, out, n_samples, channel.first);
     }
 }
 
@@ -41,8 +39,8 @@ static const struct pw_filter_events filter_events = {
     .process = on_process,
 };
 
-FilterChain::FilterChain(pw_core *pw_core, WpCore* wp_core, WpObjectManager* om, gpointer object, uint32_t expected_ports_n, std::vector<Command>* commands):
-om(om), core(wp_core), expected_ports_n(expected_ports_n), commands(commands)  {
+FilterChain::FilterChain(pw_core *pw_core, WpCore* wp_core, pw_registry* registry, WpObjectManager* om, gpointer object, uint32_t expected_ports_n, std::vector<Command>* commands):
+om(om), core(wp_core), expected_ports_n(expected_ports_n), commands(commands), registry(registry) {
     WpProperties *props = wp_pipewire_object_get_properties(WP_PIPEWIRE_OBJECT(object));
     const gchar* audio_positions = wp_properties_get(props, "audio.position");
 
@@ -105,11 +103,9 @@ om(om), core(wp_core), expected_ports_n(expected_ports_n), commands(commands)  {
             FilterChain* chain = static_cast<FilterChain*>(data);
             chain->sink_bound = true;
             chain->sink_id = wp_proxy_get_bound_id(WP_PROXY(obj));
-            chain->maybe_create_links();
         }, this);
 
     update_ports();
-    total_ports_bound--;
 }
 
 FilterChain::~FilterChain() {
@@ -118,11 +114,11 @@ FilterChain::~FilterChain() {
     pw_filter_destroy(filter);
 }
 
-void FilterChain::process(float* in, float* out, uint32_t n_samples, int channel) {
+void FilterChain::process(float* in, float* out, uint32_t n_samples, const std::string& channel) {
     memcpy(out, in, n_samples*sizeof(float));
 
-    int command_channel = channel;
-    for(auto &command : *commands) {
+    std::string command_channel = channel;
+    /*for(auto &command : *commands) {
         switch(command.type) {
         case CommandType::PREAMP:
             {
@@ -144,11 +140,10 @@ void FilterChain::process(float* in, float* out, uint32_t n_samples, int channel
             memcpy(in, out, n_samples*sizeof(float));
             break;
         }
-    }
+    }*/
 }
 
 void FilterChain::update_ports() {
-    total_ports_bound++;
     gpointer object = wp_object_manager_lookup(om, WP_TYPE_NODE,
         WP_CONSTRAINT_TYPE_G_PROPERTY, "bound-id",
         "=u", device_node_id,
@@ -204,10 +199,7 @@ void FilterChain::update_ports() {
                 0));
         }
 
-        std::cout << "Total: " << total_ports_bound << " Expected: "<< expected_ports_n << std::endl;
-        if(total_ports_bound/2 >= expected_ports_n) {
-            maybe_create_links();
-        }
+        maybe_create_links();
 
         g_value_unset(&item);
     }
@@ -217,12 +209,49 @@ void FilterChain::update_ports() {
 
 void FilterChain::maybe_create_links() {
     if(!sink_bound) {
+#ifdef DEBUG
         std::cout << "sink not bound yet, skipping link creation" << std::endl;
+#endif
         return;
     }
-    if(total_ports_bound/2 < expected_ports_n) {
-        std::cout << "not enough ports yet, skipping link creation" << std::endl;
+    if(sink_ports_bound < expected_ports_n*2) {
+#ifdef DEBUG
+        std::cout << "not enough sink ports yet, skipping link creation" << std::endl;
+#endif
         return;
+    }
+    if(filter_ports_bound < expected_ports_n*2) {
+#ifdef DEBUG
+        std::cout << "not enough filter ports yet, skipping link creation" << std::endl;
+#endif
+        return;
+    }
+    if(device_ports_bound < expected_ports_n) {
+#ifdef DEBUG
+        std::cout << "not enough device ports yet, skipping link creation" << std::endl;
+#endif
+        return;
+    }
+
+    WpIterator *it = wp_object_manager_new_filtered_iterator(om, WP_TYPE_LINK,
+        WP_CONSTRAINT_TYPE_PW_PROPERTY, PW_KEY_LINK_INPUT_NODE,
+        "=s", std::to_string(device_node_id).c_str(),
+        WP_CONSTRAINT_TYPE_PW_PROPERTY, PW_KEY_LINK_OUTPUT_NODE,
+        "!s", std::to_string(filter_id).c_str(),
+        NULL);
+    if(it) {
+        GValue item = G_VALUE_INIT;
+        while(wp_iterator_next(it, &item)) {
+            gpointer object = g_value_get_object(&item);
+            uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
+            WpProxy* proxy = WP_PROXY(object);
+            if(proxy) {
+                stream_nodes.insert_or_assign(id, false);
+                pw_registry_destroy(registry, id);
+            }
+            g_value_unset(&item);
+        }
+        wp_iterator_unref(it);
     }
 
     WpProperties* inter_link_props = wp_properties_new(
