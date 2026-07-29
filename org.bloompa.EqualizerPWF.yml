@@ -4,6 +4,28 @@ runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 command: equalizer-pwf
 modules:
+  - name: wireplumber
+    buildsystem: meson
+    config-opts:
+      - -Dsystemd=disabled
+      - -Dintrospection=disabled
+      - -Ddoc=disabled
+      - -Dmodules=false
+      - -Ddaemon=false
+      - -Dtools=false
+      - -Dtests=false
+      - -Ddbus-tests=false
+    sources:
+      - type: git
+        url: https://gitlab.freedesktop.org/pipewire/wireplumber.git
+        tag: '0.5.15'
+        disable-submodules: false
+        post-checkout:
+          - rm -f subprojects/lua.wrap
+    cleanup:
+      - /bin
+      - /etc
+      - /share
   - name: equalizer-pwf
     buildsystem: cmake
     builddir: true
@@ -27,6 +49,6 @@ finish-args:
   - --device=dri
   # Needs to save files locally
   - --filesystem=home
-  - --filesystem=xdg-run/pipewire-0:ro
+  - --filesystem=xdg-run/pipewire-0
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.kde.StatusNotifierItem

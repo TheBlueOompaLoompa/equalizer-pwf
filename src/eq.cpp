@@ -2,259 +2,93 @@
 #include "pipewire/core.h"
 #include "pipewire/filter.h"
 #include "pipewire/keys.h"
-#include "pipewire/link.h"
 #include "pipewire/node.h"
 #include "spa/utils/dict.h"
 #include <cmath>
-#include <iostream>
+#include <glib.h>
+#include <wp/node.h>
+#include <wp/properties.h>
+#include <wp/wp.h>
 
 Equalizer::Equalizer(Channel<Msg>* eq_ch, Channel<Msg>* ui_ch):
-eq_channel(eq_ch), ui_channel(ui_ch), graph() {
-    
+eq_channel(eq_ch), ui_channel(ui_ch), graph() {}
+
+Equalizer::~Equalizer() {}
+
+static void device_node_added(WpObjectManager* om, gpointer object, void* data) {
+    static_cast<Equalizer*>(data)->on_device_node_added(om, object);
+}
+void Equalizer::on_device_node_added(WpObjectManager* om, gpointer object) {
+    uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
+    uint32_t n_inputs = wp_node_get_n_input_ports(WP_NODE(object), nullptr);
+    filter_chains.insert_or_assign(id, new FilterChain(pw_core, core, om, object, n_inputs, &commands));
 }
 
-Equalizer::~Equalizer() {
-    
+static void device_node_removed(WpObjectManager* om, gpointer object, void* data) {
+    static_cast<Equalizer*>(data)->on_device_node_removed(om, object);
+}
+void Equalizer::on_device_node_removed(WpObjectManager* om, gpointer object) {
+    uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
+    delete filter_chains[id];
+    filter_chains.erase(id);
 }
 
-static bool channel = false;
-
-void Equalizer::process(std::vector<Command> &commands, float* in, float* out, uint32_t n_samples, int channel) {
-    memcpy(out, in, n_samples*sizeof(float));
-
-    int command_channel = channel; // Last recorded channel command
-    for(auto &command : commands) {
-        switch(command.type) {
-        case CommandType::PREAMP:
-            {
-                if(command_channel != channel) continue;
-                float gain = GAIN(command.audio.gain);
-                for(int i = 0; i < n_samples; i++) {
-                    out[i] = in[i] * gain;
-                }
-                memcpy(in, out, n_samples*sizeof(float));
-            }
-            break;
-        default:
-            for(int i = 0; i < n_samples; i++) {
-                if(channel) out[i] = (*command.audio.filters)[channel](in[i]);
-                else out[i] = (*command.audio.filters)[channel](in[i]);
-            }
-            memcpy(in, out, n_samples*sizeof(float));
-            break;
-        }
-    }
+static void port_changed(uint32_t node_id, void* data) {
+    static_cast<Equalizer*>(data)->on_port_changed(node_id);
 }
-
-void Equalizer::on_process(void* userdata, struct spa_io_position *position) {
-    Equalizer* eq = static_cast<Equalizer*>(userdata);
-    uint32_t n_samples = position->clock.duration;
-    eq->commands_mutex.lock();
-    for(int i = 0; i < eq->filter_inputs.size(); i++) {
-        float *in, *out;
-        in = static_cast<float*>(pw_filter_get_dsp_buffer(eq->filter_inputs[i], n_samples));
-        out = static_cast<float*>(pw_filter_get_dsp_buffer(eq->filter_outputs[i], n_samples));
-        if (in == nullptr || out == nullptr)
-            continue;
-        process(eq->commands, in, out, n_samples, i);
-        channel = !channel;
-    }
-    eq->commands_mutex.unlock();
-}
-
-static void on_core_error (void *data, uint32_t id, int seq, int res, const char *message) {
-    std::cout << "Id: " << id << " Seq: " << seq << " Res: " << res << " Error msg: " << message << std::endl;
+void Equalizer::on_port_changed(uint32_t node_id) {
+    if(filter_chains.find(node_id) != filter_chains.end()) {
+        filter_chains[node_id]->update_ports();
+    } 
 }
 
 void Equalizer::loop() {
-    const struct spa_pod *params[2];
-    uint32_t n_params = 0;
-    uint8_t buffer[1024];
-    struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+    wp_init(WP_INIT_PIPEWIRE);
 
-    pw_init(nullptr, nullptr);
+    core = wp_core_new(nullptr, nullptr, nullptr);
+    wp_core_connect(core);
+    pw_core = wp_core_get_pw_core(core);
 
-    main_loop = pw_main_loop_new(NULL);
+    graph.init(core, device_node_added, device_node_removed, port_changed, this);
 
-    static const pw_registry_events registry_events {
-        .version = PW_VERSION_REGISTRY_EVENTS,
-        .global = registry_event_global,
-        .global_remove = registry_event_global_remove,
-    };
+    wp_core_timeout_add(core, &timer_source, 20, timeout, this, NULL);
 
-    static const struct pw_core_events core_events = {
-        .version = PW_VERSION_FILTER_EVENTS,
-        .error = on_core_error,
-    };
+    main_loop = g_main_loop_new(wp_core_get_g_main_context(core), FALSE);
+    g_main_loop_run(main_loop);
 
-    context = pw_context_new(pw_main_loop_get_loop(main_loop), NULL, 0);
-    core = pw_context_connect(context, NULL, 0);
-    registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
-    graph.context = context;
-    graph.core = core;
-    graph.registry = registry;
+    g_source_destroy(timer_source);
 
-    struct spa_hook registry_listener;
-    struct spa_hook core_listener;
-
-    spa_zero(registry_listener);
-    spa_zero(core_listener);
-    pw_registry_add_listener(registry, &registry_listener, &registry_events, this);
-    pw_core_add_listener(core, &core_listener, &core_events, this);
-
-    pw_properties* sink_props = pw_properties_new(nullptr, nullptr);
-    pw_properties_set(sink_props, PW_KEY_MEDIA_TYPE, "Audio");
-    pw_properties_set(sink_props, PW_KEY_NODE_NAME, "equalizer-pwf-sink");
-    pw_properties_set(sink_props, PW_KEY_NODE_DESCRIPTION, "Equalizer PWF Sink");
-    pw_properties_set(sink_props, PW_KEY_NODE_VIRTUAL, "true");
-    pw_properties_set(sink_props, PW_KEY_NODE_PASSIVE, "out");
-    pw_properties_set(sink_props, PW_KEY_MEDIA_CLASS, "Audio/Sink");
-    pw_properties_set(sink_props, "factory.name", "support.null-audio-sink");
-    pw_properties_set(sink_props, "audio.position", "[FL,FR]");
-
-    pw_proxy* sink_node = (pw_proxy*)pw_core_create_object(core, "adapter", PW_TYPE_INTERFACE_Node, PW_VERSION_NODE, &sink_props->dict, 0);
-
-    static const struct pw_filter_events filter_events = {
-        .version = PW_VERSION_FILTER_EVENTS,
-        .process = on_process,
-    };
-
-    filter = pw_filter_new_simple(
-        pw_main_loop_get_loop(main_loop),
-        "Equalizer PWF",
-        pw_properties_new(
-            PW_KEY_MEDIA_TYPE, "Audio",
-            PW_KEY_MEDIA_CATEGORY, "Filter",
-            PW_KEY_MEDIA_ROLE, "DSP",
-            PW_KEY_NODE_NAME, "equalizer-pwf-filter",
-            PW_KEY_NODE_DESCRIPTION, "Equalizer PWF",
-            NULL),
-        &filter_events,
-        this);
-    
-    filter_inputs.push_back((Port*)pw_filter_add_port(
-        filter,
-        PW_DIRECTION_INPUT,
-        PW_FILTER_PORT_FLAG_MAP_BUFFERS,
-        sizeof(struct Port*),
-        pw_properties_new(
-            PW_KEY_FORMAT_DSP, "32 bit float mono audio",
-            PW_KEY_PORT_NAME, "input_FL",
-            PW_KEY_PORT_GROUP, "stream.0",
-            PW_KEY_AUDIO_CHANNEL, "FL",
-            nullptr),
-        nullptr,
-        0));
-
-    filter_inputs.push_back((Port*)pw_filter_add_port(
-        filter,
-        PW_DIRECTION_INPUT,
-        PW_FILTER_PORT_FLAG_MAP_BUFFERS,
-        sizeof(struct Port*),
-        pw_properties_new(
-            PW_KEY_FORMAT_DSP, "32 bit float mono audio",
-            PW_KEY_PORT_NAME, "input_FR",
-            PW_KEY_PORT_GROUP, "stream.0",
-            PW_KEY_AUDIO_CHANNEL, "FR",
-            nullptr),
-        nullptr,
-        0));
-
-    filter_outputs.push_back((Port*)pw_filter_add_port(
-        filter,
-        PW_DIRECTION_OUTPUT,
-        PW_FILTER_PORT_FLAG_MAP_BUFFERS,
-        sizeof(struct Port*),
-        pw_properties_new(
-            PW_KEY_FORMAT_DSP, "32 bit float mono audio",
-            PW_KEY_PORT_NAME, "output_FL",
-            PW_KEY_PORT_GROUP, "stream.0",
-            PW_KEY_AUDIO_CHANNEL, "FL",
-            nullptr),
-        nullptr,
-        0));
-
-    filter_outputs.push_back((Port*)pw_filter_add_port(
-        filter,
-        PW_DIRECTION_OUTPUT,
-        PW_FILTER_PORT_FLAG_MAP_BUFFERS,
-        sizeof(struct Port*),
-        pw_properties_new(
-            PW_KEY_FORMAT_DSP, "32 bit float mono audio",
-            PW_KEY_PORT_NAME, "output_FR",
-            PW_KEY_PORT_GROUP, "stream.0",
-            PW_KEY_AUDIO_CHANNEL, "FR",
-            nullptr),
-        nullptr,
-        0));
-
-    static struct spa_process_latency_info latency_info =
-        SPA_PROCESS_LATENCY_INFO_INIT(.ns = 10 * SPA_NSEC_PER_MSEC);
-
-    params[n_params++] = spa_process_latency_build(
-        &builder,
-        SPA_PARAM_ProcessLatency,
-        &latency_info);
-
-    if (pw_filter_connect(filter,
-                            PW_FILTER_FLAG_RT_PROCESS,
-                            params, n_params) < 0) {
-        fprintf(stderr, "can't connect\n");
-        return;
+    if(graph.registry) {
+        pw_proxy_destroy((struct pw_proxy*)graph.registry);
+        graph.registry = nullptr;
     }
 
-    static struct timespec timeout, interval;
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 1;
-    interval.tv_sec = 0;
-    interval.tv_nsec = 20 * SPA_NSEC_PER_MSEC;
+    wp_core_disconnect(core);
 
-    timer = pw_loop_add_timer(pw_main_loop_get_loop(main_loop), &on_timeout, this);
-    pw_loop_update_timer(pw_main_loop_get_loop(main_loop), timer, &timeout, &interval, false);
+    if(graph.om) {
+        g_object_unref(graph.om);
+        graph.om = nullptr;
+    }
 
-    /* and wait while we let things run */
-    pw_main_loop_run(main_loop);
- 
-    pw_core_destroy(core, sink_node);
-    pw_properties_free(sink_props);
-    pw_proxy_destroy((struct pw_proxy*)registry);
-    pw_core_disconnect(core);
-    pw_context_destroy(context);
-    pw_filter_destroy(filter);
-    pw_main_loop_destroy(main_loop);
-    pw_deinit();
+    g_main_loop_unref(main_loop);
 }
 
-void Equalizer::on_global_reg_event(uint32_t id, uint32_t permissions, const char *type, uint32_t version, const struct spa_dict *props) {
-    graph.on_global_reg_event(id, permissions, type, version, props);
-    ui_channel->send({
-        .type = MsgType::DEVICE_LIST,
-        .data = &graph.devices
-    });
-}
-
-void Equalizer::on_global_reg_remove_event(uint32_t id) {
-    graph.on_global_reg_remove_event(id);
-    ui_channel->send({
-        .type = MsgType::DEVICE_LIST,
-        .data = &graph.devices
-    });
-}
-
-void Equalizer::on_timeout(void* data, uint64_t expirations) {
-    Equalizer* eq = static_cast<Equalizer*>(data);
-    Msg* msg = eq->eq_channel->receive();
+void Equalizer::on_timeout() {
+    Msg* msg = eq_channel->receive();
     if(msg != nullptr) {
         switch(msg->type) {
         case MsgType::QUIT:
-            eq->graph.close();
-            pw_main_loop_quit(eq->main_loop);
+            graph.close();
+            g_main_loop_quit(main_loop);
             break;
         case MsgType::DEVICE_LIST:
-            eq->ui_channel->send({
+            ui_channel->send({
                 .type = MsgType::DEVICE_LIST,
-                .data = &eq->graph.devices
+                .data = &graph.devices
             });
+            break;
+        case MsgType::UPSERT_COMMAND:
+            //commands.size()
             break;
         default:
             printf("Msg type %i Eq unimplemented\n", msg->type);
@@ -263,13 +97,8 @@ void Equalizer::on_timeout(void* data, uint64_t expirations) {
     }
 }
 
-void Equalizer::registry_event_global(void *data, uint32_t id,
-    uint32_t permissions, const char *type, uint32_t version,
-    const struct spa_dict *props) {
-    if(id == SPA_ID_INVALID) return;
-    static_cast<Equalizer*>(data)->on_global_reg_event(id, permissions, type, version, props);
-}
-
-void Equalizer::registry_event_global_remove(void *data, uint32_t id) {
-    static_cast<Equalizer*>(data)->on_global_reg_remove_event(id);
+gboolean Equalizer::timeout(gpointer data) {
+    Equalizer* eq = static_cast<Equalizer*>(data);
+    eq->on_timeout();
+    return G_SOURCE_CONTINUE;
 }

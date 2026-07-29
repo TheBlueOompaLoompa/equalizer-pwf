@@ -456,8 +456,8 @@ void App::ui_loop() {
             break;
         case MsgType::DEVICE_LIST:
             devices.clear();
-            for(auto device : *static_cast<std::unordered_map<uint32_t, PwDevice>*>(msg->data)) {
-                PwDevice new_device = device.second;
+            for(auto device : *static_cast<std::vector<PwDevice>*>(msg->data)) {
+                PwDevice new_device = device;
                 std::string str = new_device.desc;
                 new_device.desc = (const char*)malloc(str.size()+1);
                 strncpy((char*)new_device.desc, str.c_str(), str.size());
