@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <unordered_map>
 #include <vector>
 #include <filters.h>
 
@@ -30,7 +31,7 @@ struct AudioFilterConfig {
     float q;
     float bandwidth;
 
-    std::vector<Filter>* filters = nullptr;
+    std::unordered_map<std::string, Filter*> filters;
 
     inline void update_bandwidth() {
         bandwidth = log2f(q + sqrtf(powf(q, 2.0) - 1.0));
