@@ -20,7 +20,7 @@ jobs:
       - name: Install Flatpak tooling
         run: |
           sudo apt-get update && \
-          sudo apt-get install -y flatpak flatpak-builder
+          sudo apt-get install -y flatpak flatpak-builder libwireplumber-0.5-dev
 
       - name: Build Flatpak bundle
         run: |
