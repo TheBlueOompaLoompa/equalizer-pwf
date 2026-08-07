@@ -31,8 +31,6 @@ public:
     std::vector<Command> commands;
     std::mutex commands_mutex;
 
-    std::vector<FilterChain> chains;
-
     Equalizer(Channel<Msg>* eq_ch, Channel<Msg>* ui_ch);
     ~Equalizer();
 

@@ -1,4 +1,5 @@
 #include "eq.h"
+#include "command.h"
 #include "pipewire/core.h"
 #include "pipewire/filter.h"
 #include "pipewire/keys.h"
@@ -22,6 +23,7 @@ void Equalizer::on_device_node_added(gpointer object) {
     uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
     uint32_t n_inputs = wp_node_get_n_input_ports(WP_NODE(object), nullptr);
     filter_chains.insert_or_assign(id, new FilterChain(pw_core, core, registry, om, object, n_inputs, &commands));
+    FilterChain* chain = filter_chains[id];
 }
 
 void Equalizer::on_device_node_removed(gpointer object) {
@@ -106,8 +108,10 @@ void Equalizer::on_timeout() {
                 .data = &devices
             });
             break;
-        case MsgType::UPSERT_COMMAND:
-            //commands.size()
+        case MsgType::COMMANDS_CHANGED:
+            for(auto& chain : filter_chains) {
+                chain.second->update_filters();
+            }
             break;
         default:
             printf("Msg type %i Eq unimplemented\n", msg->type);
@@ -169,22 +173,19 @@ void Equalizer::on_object_added(gpointer object) {
         const char *desc = wp_properties_get(props, PW_KEY_NODE_DESCRIPTION);
         const char *media_class = wp_properties_get(props, PW_KEY_MEDIA_CLASS);
 
-        if(name && strcmp(name, "equalizer-pwf-filter") == 0) {
-            uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
-            const char *dev_id_str = wp_properties_get(props, "target-device-id");
+        uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
+        const char *dev_id_str = wp_properties_get(props, "target-device-id");
+        if(name && strcmp(name, "equalizer-pwf-filter") == 0 && dev_id_str != nullptr) {
             uint32_t dev_id = strtoul(dev_id_str, nullptr, 10);
             pwf_node_ids.insert(id);
             filter_chains[dev_id]->filter_id = id;
         }else if(desc && strcmp(desc, "Equalizer PWF Sink") == 0) {
-            uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
             pwf_node_ids.insert(id);
         }else if(media_class && strcmp(media_class, "Audio/Sink") == 0) {
-            uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
             audio_sink_ids.insert(id);
             on_device_node_added(object);
         }
 
-        uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
         for(int i = 0; i < nodeless_port_change_queue.size(); i++) {
             if(nodeless_port_change_queue[i] == id) {
                 on_port_added(id);

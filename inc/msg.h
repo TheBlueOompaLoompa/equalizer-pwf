@@ -6,11 +6,13 @@ enum MsgType {
     QUIT,
     DEVICE_LIST,
     UPDATE_CONFIG,
-    UPSERT_COMMAND,
+    COMMANDS_CHANGED,
+    INSERT_COMMAND,
+    UPDATE_COMMAND,
     DELETE_COMMAND,
 };
 
-struct Msg_UpsertData {
+struct Msg_CommandData {
     int id;
     Command cmd;
 };
@@ -19,7 +21,7 @@ struct Msg {
     MsgType type;
     union {
         void* data = nullptr;
-        Msg_UpsertData* upsert_data;
+        Msg_CommandData* command_data;
         int* id;
     };
     bool free = false;

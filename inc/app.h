@@ -69,6 +69,7 @@ private:
     bool rack_bp(Command& command);
     bool rack_shelf(Command& command, bool is_low);
     bool rack_ap(Command& command);
+    bool rack_channel(Command& command);
 
     void update_response_samples();
 

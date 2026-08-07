@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
+#include <iostream>
 #include <unordered_map>
 #include <vector>
 #include <filters.h>
@@ -15,6 +17,7 @@ enum CommandType {
     HIGH_SHELF,
     CHANNEL,
 };
+#define IS_FILTER_COMMAND_TYPE(type) (type != CommandType::PREAMP && type != CommandType::CHANNEL)
 
 enum ShelfShaper {
     Q,
@@ -31,7 +34,7 @@ struct AudioFilterConfig {
     float q;
     float bandwidth;
 
-    std::unordered_map<std::string, Filter*> filters;
+    std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>* chain_filters;
 
     inline void update_bandwidth() {
         bandwidth = log2f(q + sqrtf(powf(q, 2.0) - 1.0));
@@ -42,10 +45,68 @@ struct AudioFilterConfig {
     }
 };
 
-struct Command {
+class Command {
+public:
     CommandType type;
     union {
         AudioFilterConfig audio;
-        int channel;
+        uint16_t channels;
     };
+
+    ~Command() {
+        if(type == CommandType::PREAMP || type == CommandType::CHANNEL) return;
+        for(auto& chain_set : *audio.chain_filters) {
+            for(auto& filter : chain_set.second) {
+                if(filter.second != nullptr) {
+                    delete filter.second;
+                    filter.second = nullptr;
+                }
+            }
+        }
+    }
+
+    bool is_filter() {
+        return IS_FILTER_COMMAND_TYPE(type);
+    }
+
+    void update_filters() {
+        if(!is_filter()) return;
+        for(auto& filters : *audio.chain_filters) {
+            for(auto& filter : filters.second) {
+                update_filter(filter.second);
+            }
+        }
+    }
+
+private:
+    void update_filter(Filter* &filter_ref) {
+        if(filter_ref == nullptr) {
+            filter_ref = new Filter();
+            std::cout << "New filter" << std::endl;
+        }
+        switch(type) {
+        case CommandType::PEAKING:
+            update_peaking(filter_ref);
+            break;
+        case CommandType::LOW_SHELF:
+        case CommandType::HIGH_SHELF:
+            update_shelf(filter_ref);
+            break;
+        default:
+            std::cerr << "Error: Unhandled filter in command.h:update_filter() " << type << std::endl;
+            break;
+        }
+    }
+
+    void update_peaking(Filter* filter) {
+        filter->peakDbQ(audio.center_freq/44100.0, audio.gain, audio.q);
+    }
+
+    void update_shelf(Filter* filter) {
+        if(type == CommandType::LOW_SHELF) {
+            filter->lowShelfDbQ(audio.center_freq/44100.0, audio.gain, audio.q);
+        }else {
+            filter->highShelfDbQ(audio.center_freq/44100.0, audio.gain, audio.q);
+        }
+    }
 };

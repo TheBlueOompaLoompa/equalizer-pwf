@@ -4,6 +4,7 @@
 #include <iostream>
 #include <ostream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "eq.h"
@@ -21,7 +22,7 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
                     .gain = 0.0,
                     .center_freq = 100,
                     .q = 10.0,
-                    .filters = new std::vector<Filter>()
+                    .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
                 }
             });
         }else if(cmdlet.compare("HS") == 0) {
@@ -32,7 +33,7 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
                     .gain = 0.0,
                     .center_freq = 100,
                     .q = 10.0,
-                    .filters = new std::vector<Filter>()
+                    .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
                 }
             });
         }else if(cmdlet.compare("PK") == 0) {
@@ -43,7 +44,7 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
                     .gain = 0.0,
                     .center_freq = 100,
                     .q = 10.0,
-                    .filters = new std::vector<Filter>()
+                    .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
                 }
             });
         }else if(cmdlet.compare("Fc") == 0) {
@@ -82,6 +83,26 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
     }
 }
 
+static void parse_channel(std::istringstream &iss, std::vector<Command>& commands) {
+    std::string cmdlet;
+    uint16_t channels = 0;
+    while(iss >> cmdlet) {
+        if(cmdlet == "L") channels |= 1 << 0;
+        if(cmdlet == "R") channels |= 1 << 1;
+        if(cmdlet == "C") channels |= 1 << 2;
+        if(cmdlet == "LFE") channels |= 1 << 3;
+        if(cmdlet == "RL") channels |= 1 << 4;
+        if(cmdlet == "RR") channels |= 1 << 5;
+        if(cmdlet == "RC") channels |= 1 << 6;
+        if(cmdlet == "SL") channels |= 1 << 7;
+        if(cmdlet == "SR") channels |= 1 << 8;
+    }
+    commands.push_back({
+        .type = CommandType::CHANNEL,
+        .channels = channels
+    });
+}
+
 static void deserialize_config(const char* path, std::vector<Command>& commands) {
     std::ifstream file(path);
 
@@ -90,21 +111,23 @@ static void deserialize_config(const char* path, std::vector<Command>& commands)
         std::istringstream iss(line);
         std::string cmdlet;
         while(iss >> cmdlet) {
-            if(cmdlet.compare("Preamp:") == 0) {
+            if(cmdlet == "Preamp:") {
                 commands.push_back({
                     .type = CommandType::PREAMP,
                     .audio = { .gain = 0.0 }
                 });
                 iss >> commands[commands.size()-1].audio.gain;
-            }else if(cmdlet.compare("Filter:") == 0) {
+            }else if(cmdlet == "Filter:") {
                 parse_filter(iss, commands);
-            }else if(cmdlet.compare("Filter") == 0) {
+            }else if(cmdlet == "Filter") {
                 std::string next;
                 iss >> next;
                 if(next.find(":") != std::string::npos) {
                     int id = std::stoi(next.substr(0, next.size()-1));
                     parse_filter(iss, commands, id);
                 }
+            }else if(cmdlet == "Channel:") {
+                parse_channel(iss, commands);
             }
         }
     }
@@ -127,8 +150,23 @@ static void serialize_config(const char* path, std::vector<Command>& commands) {
                 file << "Filter: ON HS Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain << " dB Q " << command.audio.q;
                 break;
             case CommandType::PEAKING:
-                file << "Filter: ON PK Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain << " dB Q " << command.audio.q;
+                file << "Filter: ON PK Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain;
                 if(command.audio.use_bandwith)
+                    file << "BW Oct " << command.audio.bandwidth;
+                else
+                    file << " dB Q " << command.audio.q;
+                break;
+            case CommandType::CHANNEL:
+                file << "Channel: ";
+                if(command.channels & (1 << 0)) file << "L ";
+                if(command.channels & (1 << 1)) file << "R ";
+                if(command.channels & (1 << 2)) file << "C ";
+                if(command.channels & (1 << 3)) file << "LFE ";
+                if(command.channels & (1 << 4)) file << "RL ";
+                if(command.channels & (1 << 5)) file << "RR ";
+                if(command.channels & (1 << 6)) file << "RC ";
+                if(command.channels & (1 << 7)) file << "SL ";
+                if(command.channels & (1 << 8)) file << "SR ";
                 break;
             default:
                 std::cout << "Failed to save config param of type " << command.type << std::endl;

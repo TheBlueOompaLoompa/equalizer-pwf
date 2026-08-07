@@ -9,6 +9,7 @@
 #include <spa/pod/builder.h>
 #include <spa/utils/defs.h>
 #include <string>
+#include <vector>
 #include <wp/iterator.h>
 #include <wp/link.h>
 #include <wp/node.h>
@@ -23,6 +24,18 @@
 void on_process(void* userdata, struct spa_io_position *position) {
     FilterChain* chain = static_cast<FilterChain*>(userdata);
     uint32_t n_samples = position->clock.duration;
+    chain->processing_channels = 0x1ff;
+
+    if(chain->commands->size() == 0) {
+        for(auto& channel : chain->input_ports) {
+            float *in, *out;
+            in = static_cast<float*>(pw_filter_get_dsp_buffer(channel.second, n_samples));
+            out = static_cast<float*>(pw_filter_get_dsp_buffer(chain->output_ports[channel.first], n_samples));
+            if (in == nullptr || out == nullptr)
+                continue;
+            memcpy(out, in, n_samples*sizeof(float));
+        }
+    }
 
     for(auto& channel : chain->input_ports) {
         float *in, *out;
@@ -30,7 +43,9 @@ void on_process(void* userdata, struct spa_io_position *position) {
         out = static_cast<float*>(pw_filter_get_dsp_buffer(chain->output_ports[channel.first], n_samples));
         if (in == nullptr || out == nullptr)
             continue;
-        chain->process(in, out, n_samples, channel.first);
+        for(auto& command : *chain->commands) {
+            chain->process(command, channel.first, in, out, n_samples);
+        }
     }
 }
 
@@ -40,7 +55,7 @@ static const struct pw_filter_events filter_events = {
 };
 
 FilterChain::FilterChain(pw_core *pw_core, WpCore* wp_core, pw_registry* registry, WpObjectManager* om, gpointer object, uint32_t expected_ports_n, std::vector<Command>* commands):
-om(om), core(wp_core), expected_ports_n(expected_ports_n), commands(commands), registry(registry) {
+om(om), core(wp_core), expected_ports_n(expected_ports_n), registry(registry), commands(commands) {
     WpProperties *props = wp_pipewire_object_get_properties(WP_PIPEWIRE_OBJECT(object));
     const gchar* audio_positions = wp_properties_get(props, "audio.position");
 
@@ -109,38 +124,58 @@ om(om), core(wp_core), expected_ports_n(expected_ports_n), commands(commands), r
 }
 
 FilterChain::~FilterChain() {
-    std::cout << "Destroyed?" << std::endl;
     pw_proxy_destroy((struct pw_proxy*)sink_node);
     pw_filter_destroy(filter);
 }
 
-void FilterChain::process(float* in, float* out, uint32_t n_samples, const std::string& channel) {
+void FilterChain::process(Command& command, const std::string& channel, float* in, float* out, uint32_t n_samples) {
     memcpy(out, in, n_samples*sizeof(float));
-
-    std::string command_channel = channel;
-    /*for(auto &command : *commands) {
-        switch(command.type) {
-        case CommandType::PREAMP:
-            {
-                if(command_channel != channel) continue;
-                float gain = GAIN(command.audio.gain);
-                for(int i = 0; i < n_samples; i++) {
-                    out[i] = in[i] * gain;
-                }
-                memcpy(in, out, n_samples*sizeof(float));
-            }
-            break;
-        case CommandType::CHANNEL:
-            break;
-        default:
+    if((processing_channels & (0b1 << 0)) == 0 && channel == "FL") return;
+    if((processing_channels & (0b1 << 1)) == 0 && channel == "FR") return;
+    if((processing_channels & (0b1 << 2)) == 0 && channel == "C") return;
+    if((processing_channels & (0b1 << 3)) == 0 && channel == "LFE") return;
+    if((processing_channels & (0b1 << 4)) == 0 && channel == "RL") return;
+    if((processing_channels & (0b1 << 5)) == 0 && channel == "RR") return;
+    if((processing_channels & (0b1 << 6)) == 0 && channel == "RC") return;
+    if((processing_channels & (0b1 << 7)) == 0 && channel == "SL") return;
+    if((processing_channels & (0b1 << 8)) == 0 && channel == "SR") return;
+    switch(command.type) {
+    case CommandType::PREAMP:
+        {
+            float gain = GAIN(command.audio.gain);
             for(int i = 0; i < n_samples; i++) {
-                if(channel) out[i] = (*command.audio.filters)[channel](in[i]);
-                else out[i] = (*command.audio.filters)[channel](in[i]);
+                out[i] = in[i] * gain;
             }
             memcpy(in, out, n_samples*sizeof(float));
-            break;
         }
-    }*/
+        break;
+    case CommandType::CHANNEL:
+        processing_channels = command.channels;
+        break;
+    default:
+        if((*command.audio.chain_filters)[device_node_id][channel] != nullptr) {
+            for(int i = 0; i < n_samples; i++) {
+                out[i] = (*(*command.audio.chain_filters)[device_node_id][channel])(in[i]);
+            }
+        }
+        memcpy(in, out, n_samples*sizeof(float));
+        break;
+    }
+}
+
+void FilterChain::update_filters() {
+    for(auto& command : *commands) {
+        if(command.is_filter()) {
+            if(command.audio.chain_filters == nullptr)
+                command.audio.chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>();
+            std::unordered_map<std::string, Filter*>* filters = &(*command.audio.chain_filters)[device_node_id];
+            for(const auto& channel : input_ports) {
+                if(filters->find(channel.first) == filters->end())
+                    filters->insert_or_assign(channel.first, new Filter());
+            }
+            command.update_filters();
+        }
+    }
 }
 
 void FilterChain::update_ports() {

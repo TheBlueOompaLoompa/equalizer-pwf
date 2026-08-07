@@ -1,5 +1,6 @@
 #include "app.h"
 #include "SDL3/SDL_error.h"
+#include "command.h"
 #include "eq.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -27,6 +28,9 @@ App::App() {
     for(const auto command : commands) {
         equalizer->commands.push_back(command);
     }
+    eq_channel->send({
+        .type = MsgType::COMMANDS_CHANGED,
+    });
     update_response_samples();
 
     App::instance = this;
@@ -141,11 +145,17 @@ bool App::ui_render() {
         case CommandType::HIGH_SHELF:
             changed = rack_shelf(commands[i], false);
             break;
+        case CommandType::CHANNEL:
+            changed = rack_channel(commands[i]);
+            break;
         }
         if(changed) {
             equalizer->commands_mutex.lock();
             equalizer->commands[i] = commands[i];
             equalizer->commands_mutex.unlock();
+            eq_channel->send({
+                .type = MsgType::COMMANDS_CHANGED,
+            });
             update_response_samples();
             Config::serialize_config(config_path.c_str(), commands);
         }
@@ -193,7 +203,7 @@ bool App::rack_preamp(Command& command) {
 bool App::rack_pk(Command& command) {
     bool changed = false;
     ImGui::Text("Peaking");
-    GAIN_INPUT;
+    changed |= GAIN_INPUT;
     CENTER_FREQ;
     if(!command.audio.use_bandwith) {
         if(QFAC) {
@@ -207,8 +217,7 @@ bool App::rack_pk(Command& command) {
         }
     }
     if(changed) {
-        for(auto &filter : *command.audio.filters)
-            filter.peakDbQ(command.audio.center_freq/44100.0, command.audio.gain, command.audio.q);
+        command.update_filters();
     }
 
     return changed;
@@ -249,20 +258,57 @@ bool App::rack_shelf(Command& command, bool is_low) {
 
     if(changed) {
         if(command.audio.shaper == ShelfShaper::FIXED_S) { FIXED_S_CALC }
-        if(is_low) {
-            for(auto &filter : *command.audio.filters)
-                filter.lowShelfDbQ(command.audio.center_freq/44100.0, command.audio.gain, command.audio.q);
-        }else {
-            for(auto &filter : *command.audio.filters)
-                filter.highShelfDbQ(command.audio.center_freq/44100.0, command.audio.gain, command.audio.q);
-        }
+        command.update_filters();
     }
 
     return changed;
 }
 
+bool App::rack_channel(Command& command) {
+    ImGui::Text("Channel");
+    bool fl = command.channels & 1;
+    bool fr = (command.channels & (1 << 1)) > 0;
+    bool c = (command.channels & (1 << 2)) > 0;
+    bool lfe = (command.channels & (1 << 3)) > 0;
+    bool rl = (command.channels & (1 << 4)) > 0;
+    bool rr = (command.channels & (1 << 5)) > 0;
+    bool rc = (command.channels & (1 << 6)) > 0;
+    bool sl = (command.channels & (1 << 7)) > 0;
+    bool sr = (command.channels & (1 << 8)) > 0;
+    bool changed = false;
+    changed |= ImGui::Checkbox("FL", &fl);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("FR", &fr);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("C", &c);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("RL", &rl);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("RR", &rr);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("RC", &rc);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("LFE", &lfe);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("SL", &sl);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("SR", &sr);
+    command.channels = fl | (fr << 1) | (c << 2) | (lfe << 3) | (rl << 4) | (rr << 5) | (rc << 6) | (sl << 7) | (sr << 8);
+    if(ImGui::Button("Set All")) {
+        command.channels = 0x1ff;
+        changed = true;
+    }
+    ImGui::SameLine();
+    if(ImGui::Button("Unset All")) {
+        command.channels = 0;
+        changed = true;
+    }
+    return changed;
+}
+
 void App::add_filter_menu(int pos) {
-    if(ImGui::BeginMenu("Add Filter Command")) {
+    bool command_added = false;
+    if(ImGui::BeginMenu("Add Command")) {
         if(ImGui::BeginMenu("Basic Filters")) {
             if (ImGui::MenuItem("Preamp"))   {
                 Command cmd = {
@@ -275,6 +321,10 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
+                eq_channel->send({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                command_added = true;
             }
             ImGui::EndMenu();
         }
@@ -286,13 +336,17 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .center_freq = 100,
                         .q = 0.7,
-                        .filters = new std::vector<Filter>()
+                        .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
                     }
                 };
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
+                eq_channel->send({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                command_added = true;
             }
             if (ImGui::MenuItem("High Shelf Filter"))   {
                 Command cmd = {
@@ -301,13 +355,17 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .center_freq = 10000,
                         .q = 0.7,
-                        .filters = new std::vector<Filter>()
+                        .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
                     }
                 };
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
+                eq_channel->send({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                command_added = true;
             }
             if (ImGui::MenuItem("Peaking Filter"))   {
                 Command cmd = {
@@ -316,7 +374,7 @@ void App::add_filter_menu(int pos) {
                         .gain = 0.0,
                         .center_freq = 100,
                         .q = 10.0,
-                        .filters = new std::vector<Filter>()
+                        .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
                     }
                 };
                 cmd.audio.update_bandwidth();
@@ -324,11 +382,35 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
+                eq_channel->send({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                command_added = true;
+            }
+            ImGui::EndMenu();
+        }
+        if(ImGui::BeginMenu("Control")) {
+            if(ImGui::MenuItem("Channel")) {
+                Command cmd = {
+                    .type = CommandType::CHANNEL,
+                    .channels = 0
+                };
+                commands.insert(commands.begin() + pos, cmd);
+                equalizer->commands_mutex.lock();
+                equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
+                equalizer->commands_mutex.unlock();
+                eq_channel->send({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                command_added = true;
             }
             ImGui::EndMenu();
         }
         ImGui::EndMenu();
     }
+
+    if(command_added) 
+        Config::serialize_config(config_path.c_str(), commands);
 }
 
 int App::loop() {
@@ -577,8 +659,8 @@ void App::update_response_samples() {
                 }
                 break;
             default:
-                if(command.audio.filters != nullptr && command.audio.filters->size() > 0)
-                    resp_samples[i] += (*command.audio.filters)[0].responseDb((float)fq/44100.0);
+                /*if(command.audio.filters != nullptr && command.audio.filters->size() > 0)
+                    resp_samples[i] += (*command.audio.filters)[0].responseDb((float)fq/44100.0);*/
                 break;
             }
         }
