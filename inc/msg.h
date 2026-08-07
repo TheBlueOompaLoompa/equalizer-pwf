@@ -7,9 +7,7 @@ enum MsgType {
     DEVICE_LIST,
     UPDATE_CONFIG,
     COMMANDS_CHANGED,
-    INSERT_COMMAND,
-    UPDATE_COMMAND,
-    DELETE_COMMAND,
+    FREQ_RESPONSE_COMPUTED,
 };
 
 struct Msg_CommandData {

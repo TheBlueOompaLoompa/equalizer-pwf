@@ -1,5 +1,6 @@
 #pragma once
 
+#include "util.h"
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -76,6 +77,38 @@ public:
                 update_filter(filter.second);
             }
         }
+    }
+
+    float responseDb(const uint32_t& device_id, const std::string& channel, float fq) {
+        switch(type) {
+        case CommandType::PREAMP:
+            {
+                float gain_linear = GAIN(audio.gain);
+                return 20.0f * log10f(fmaxf(gain_linear, 1e-9f));
+            }
+            break;
+        case CommandType::CHANNEL:
+            break;
+        default:
+            if(audio.chain_filters->find(device_id) != audio.chain_filters->end() && (*audio.chain_filters)[device_id].find(channel) != (*audio.chain_filters)[device_id].end())
+                return (*audio.chain_filters)[device_id][channel]->responseDb((float)fq/44100.0);
+            break;
+        }
+
+        return 0.0f;
+    }
+
+    bool has_channel(const std::string& channel) {
+        if(channel == "FL") return (channels & (1 << 0)) > 0;
+        else if(channel == "FR") return (channels & (1 << 1)) > 0;
+        else if(channel == "C") return (channels & (1 << 2)) > 0;
+        else if(channel == "LFE") return (channels & (1 << 3)) > 0;
+        else if(channel == "RL") return (channels & (1 << 4)) > 0;
+        else if(channel == "RR") return (channels & (1 << 5)) > 0;
+        else if(channel == "RC") return (channels & (1 << 6)) > 0;
+        else if(channel == "SL") return (channels & (1 << 7)) > 0;
+        else if(channel == "SR") return (channels & (1 << 8)) > 0;
+        return false;
     }
 
 private:

@@ -20,6 +20,7 @@
 
 #include "filter_chain.h"
 #include "command.h"
+#include "util.h"
 
 void on_process(void* userdata, struct spa_io_position *position) {
     FilterChain* chain = static_cast<FilterChain*>(userdata);

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <glib.h>
 #include <iostream>
+#include <wp/iterator.h>
 #include <wp/node.h>
 #include <wp/port.h>
 #include <wp/properties.h>
@@ -111,7 +112,34 @@ void Equalizer::on_timeout() {
         case MsgType::COMMANDS_CHANGED:
             for(auto& chain : filter_chains) {
                 chain.second->update_filters();
+                responses_mutex.lock();
+                if(responses.find(chain.first) == responses.end())
+                    responses.insert_or_assign(chain.first, std::unordered_map<std::string, float*>());
+                for(auto& channel: chain.second->input_ports) {
+                    if(responses[chain.first].find(channel.first) == responses[chain.first].end())
+                        responses[chain.first].insert_or_assign(channel.first, (float*)malloc(22000/2*sizeof(float)));
+                    bool channel_enabled = true;
+                    for(int i = 0; i < 22000/2; i++) {
+                        int fq = i*2 + 1;
+                        responses[chain.first][channel.first][i] = 0;
+                        for(auto& command : commands) {
+                            switch(command.type) {
+                            case CommandType::CHANNEL:
+                                channel_enabled = command.has_channel(channel.first);
+                                break;
+                            default:
+                                if(channel_enabled)
+                                    responses[chain.first][channel.first][i] += command.responseDb(chain.first, channel.first, fq);
+                                break;
+                            }
+                        }
+                    }
+                }
+                responses_mutex.unlock();
             }
+            ui_channel->send({
+                .type = MsgType::FREQ_RESPONSE_COMPUTED,
+            });
             break;
         default:
             printf("Msg type %i Eq unimplemented\n", msg->type);
@@ -149,13 +177,42 @@ void Equalizer::rebuild_device_list() {
 
         WpProperties *props = wp_pipewire_object_get_properties(WP_PIPEWIRE_OBJECT(object));
         const char *desc_str = wp_properties_get(props, PW_KEY_NODE_DESCRIPTION);
+        const char *positions_str = wp_properties_get(props, "audio.position");
         uint32_t id = wp_proxy_get_bound_id(WP_PROXY(object));
 
-        if(desc_str) {
+        if(desc_str && positions_str) {
             size_t len = strlen(desc_str);
             char *desc_copy = (char*)malloc(len + 1);
             memcpy(desc_copy, desc_str, len + 1);
-            devices.push_back({ id, desc_copy });
+            uint8_t channel_count = 0;
+            for(size_t i = 0; positions_str[i] != '\0'; i++) {
+                if(positions_str[i] == ',') channel_count++;
+            }
+
+            char** channel_list = (char**)malloc(channel_count*sizeof(char*));
+
+            size_t channel_naming = 0;
+            size_t ch = 0;
+            channel_list[0] = (char*)malloc(4);
+            channel_list[0][2] = 0;
+            channel_list[0][3] = 0;
+            for(size_t i = 0; positions_str[i] != '\0'; i++) {
+                if(positions_str[i] > 'A' && positions_str[i] < 'Z')
+                    channel_list[channel_naming][ch++] = positions_str[i];
+                else if(positions_str[i] == ',') {channel_count++;
+                    channel_list[++channel_naming] = (char*)malloc(4);
+                    ch = 0;
+                    channel_list[channel_naming][2] = 0;
+                    channel_list[channel_naming][3] = 0;
+                }
+            }
+
+            devices.push_back(PwDevice {
+                .id = id,
+                .desc = desc_copy,
+                .channels = (const char**)channel_list,
+                .n_channels = channel_count
+            });
         }
         wp_properties_unref(props);
         g_value_unset(&item);

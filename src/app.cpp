@@ -59,6 +59,8 @@ static const char* const tick_labels[] = {
     "10k", "13k", "16k", "20k"
 };
 
+static std::uint32_t selected_device = -1;
+
 bool App::ui_render() {
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
@@ -70,21 +72,22 @@ bool App::ui_render() {
     ImGui::Text("Device:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
-    if(ImGui::BeginCombo("###devices", selected_name.c_str())) {
-        /*if(audio_sink_info_mutex.try_lock()) {
-            for(int i = 0; i < audio_sink_info.size(); i++) {
-                if(ImGui::Selectable(audio_sink_info[i].name.c_str(), false)) {
-                    selected_name = audio_sink_info[i].name;
-                }
-            }
-            audio_sink_info_mutex.unlock();
-        }*/
-        for(const auto device : devices) {
-            if(ImGui::Selectable(device.desc, false)){
-
+    if(devices.size() > 0) {
+        if(selected_device == -1) {
+            for(const auto& dev : devices) {
+                std::cout << dev.first;
+                selected_device = dev.first;
             }
         }
-        ImGui::EndCombo();
+        if(ImGui::BeginCombo("###devices", devices[selected_device].desc)) {
+            for(const auto device : devices) {
+                if(ImGui::Selectable(device.second.desc, device.first == selected_device)){
+                    selected_device = device.first;
+                    update_response_samples();
+                }
+            }
+            ImGui::EndCombo();
+        }
     }
     ImGui::NextColumn();
     ImGui::Text("Channel configuration:");
@@ -100,8 +103,16 @@ bool App::ui_render() {
     ImGui::Text("Channels:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(ImGui::CalcTextSize("Abc").x + 50.0);
-    if(ImGui::BeginCombo("###channels", "L")) {
-        ImGui::EndCombo();
+    if(devices.size() > 0) {
+        if(selected_device != -1 && ImGui::BeginCombo("###channels", devices[selected_device].channels[selected_channel])) {
+            for(uint8_t i = 0; i < devices[selected_device].n_channels; i++) {
+                if(ImGui::Selectable(devices[selected_device].channels[i], selected_channel == i)) {
+                    selected_channel = i;
+                    update_response_samples();
+                }
+            }
+            ImGui::EndCombo();
+        }
     }
     ImGui::NextColumn();
     if(ImPlot::BeginPlot("Frequency Response", ImVec2(-1, 0), ImPlotFlags_NoLegend)) {
@@ -113,12 +124,10 @@ bool App::ui_render() {
         ImPlot::SetupAxisLimits(ImAxis_Y1, -60, 20);
         ImPlot::SetupAxisTicks(ImAxis_X1, tick_nums, n_ticks, tick_labels, false);
         ImPlotSpec spec;
-        ImPlot::PlotLine("Response", resp_samples_x, resp_samples,
-                            sizeof(resp_samples)/sizeof(float), spec);
+        ImPlot::PlotLine("Response", resp_samples_x, resp_samples, sizeof(resp_samples)/sizeof(float), spec);
         spec.LineColor = ImVec4(193.0/255.0, 114.0/255.0, 144.0/255.0, 1.0);
         spec.Flags = ImPlotLineFlags_Shaded;
-        ImPlot::PlotLine("Peaking Response", resp_samples_x, bad_resp_samples,
-                            sizeof(resp_samples)/sizeof(float), spec);
+        ImPlot::PlotLine("Peaking Response", resp_samples_x, bad_resp_samples, sizeof(resp_samples)/sizeof(float), spec);
         ImPlot::EndPlot();
     }
     ImGui::EndColumns();
@@ -180,10 +189,10 @@ bool App::ui_render() {
     return true;
 }
 
-#define GAIN_INPUT ImGui::DragFloat("gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
-#define CENTER_FREQ changed |= ImGui::DragFloat("center", &command.audio.center_freq, 12.0f, 1.0f, 22000.0f, "%.2f Hz", ImGuiSliderFlags_Logarithmic)
+#define GAIN_INPUT ImGui::DragFloat("Gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
+#define CENTER_FREQ changed |= ImGui::DragFloat("Center Frequency", &command.audio.center_freq, 12.0f, 1.0f, 22000.0f, "%.2f Hz", ImGuiSliderFlags_Logarithmic)
 #define QFAC ImGui::DragFloat("Q Factor", &command.audio.q, .1, .333f, 33.333f)
-#define BANDWIDTH ImGui::DragFloat("oct Bandwith", &command.audio.bandwidth, .1, .01f, 20.0f)
+#define BANDWIDTH ImGui::DragFloat("Bandwith", &command.audio.bandwidth, .1, .01f, 20.0f, "%.2f oct")
 #define FIXED_S_CALC float A = powf(10.0, command.audio.gain/40.0); \
                 command.audio.q = 1.0/sqrtf((A + 1.0/A)*(1.0/.9-1.0)+2.0);
 
@@ -266,7 +275,7 @@ bool App::rack_shelf(Command& command, bool is_low) {
 
 bool App::rack_channel(Command& command) {
     ImGui::Text("Channel");
-    bool fl = command.channels & 1;
+    bool fl = (command.channels & 1) > 0;
     bool fr = (command.channels & (1 << 1)) > 0;
     bool c = (command.channels & (1 << 2)) > 0;
     bool lfe = (command.channels & (1 << 3)) > 0;
@@ -543,8 +552,11 @@ void App::ui_loop() {
                 std::string str = new_device.desc;
                 new_device.desc = (const char*)malloc(str.size()+1);
                 strncpy((char*)new_device.desc, str.c_str(), str.size());
-                devices.push_back(new_device);
+                devices.insert_or_assign(new_device.id, new_device);
             }
+            break;
+        case MsgType::FREQ_RESPONSE_COMPUTED:
+            update_response_samples();
             break;
         default:
             printf("Msg type %i UI unimplemented\n", msg->type);
@@ -643,39 +655,26 @@ float to_db(float m) {
 }
 
 void App::update_response_samples() {
-    for(int i = 0; i < sizeof(resp_samples)/sizeof(float); i++) {
-        resp_samples[i] = 0.0;
-        resp_samples_x[i] = i * 2 + 1;
-    }
+    equalizer->responses_mutex.lock();
+    bool unlocked = false;
+    if(equalizer->responses.find(selected_device) != equalizer->responses.end() && equalizer->responses[selected_device].find(devices[selected_device].channels[selected_channel]) != equalizer->responses[selected_device].end()) {
+        memcpy(resp_samples, equalizer->responses[selected_device][devices[selected_device].channels[selected_channel]], sizeof(resp_samples));
+        equalizer->responses_mutex.unlock();
+        unlocked = true;
 
-    for(const auto &command : commands) {
-        for(int i = 0; i < sizeof(resp_samples)/sizeof(float); i++) {
-            int fq = i*2 + 1;
-            switch(command.type) {
-            case CommandType::PREAMP:
-                {
-                    float gain_linear = GAIN(command.audio.gain);
-                    resp_samples[i] += 20.0f * log10f(fmaxf(gain_linear, 1e-9f));
-                }
-                break;
-            default:
-                /*if(command.audio.filters != nullptr && command.audio.filters->size() > 0)
-                    resp_samples[i] += (*command.audio.filters)[0].responseDb((float)fq/44100.0);*/
-                break;
+        peak_gain = -9999.0;
+        for(int i = 0; i < 22000/2; i++) {
+            resp_samples_x[i] = i * 2 + 1;
+            if(peak_gain < resp_samples[i]) peak_gain = resp_samples[i];
+            if(resp_samples[i] > 0.0f) {
+                bad_resp_samples[i] = resp_samples[i];
+                resp_samples[i] = 0.0f;
+            }else {
+                bad_resp_samples[i] = 0.0f;
             }
         }
     }
-
-    peak_gain = -9999.0;
-    for(int i = 0; i < sizeof(resp_samples)/sizeof(float); i++) {
-        if(resp_samples[i] > peak_gain) peak_gain = resp_samples[i];
-        if(resp_samples[i] > 0.0f) {
-            bad_resp_samples[i] = resp_samples[i];
-            resp_samples[i] = 0;
-        }else {
-            bad_resp_samples[i] = 0;
-        }
-    }
+    if(!unlocked) equalizer->responses_mutex.unlock();
 }
 
 void App::on_show_window() {

@@ -46,7 +46,10 @@ private:
 
     Equalizer* equalizer = nullptr;
 
-    std::vector<PwDevice> devices;
+    uint32_t selected_device = -1;
+    uint32_t selected_channel = 0;
+
+    std::unordered_map<uint32_t, PwDevice> devices;
     std::vector<Command> commands;
 
     float resp_samples_x[22000/2] = {0};

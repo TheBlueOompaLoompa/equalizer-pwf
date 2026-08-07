@@ -30,6 +30,8 @@ public:
 
     std::vector<Command> commands;
     std::mutex commands_mutex;
+    std::mutex responses_mutex;
+    std::unordered_map<uint32_t, std::unordered_map<std::string, float*>> responses;
 
     Equalizer(Channel<Msg>* eq_ch, Channel<Msg>* ui_ch);
     ~Equalizer();

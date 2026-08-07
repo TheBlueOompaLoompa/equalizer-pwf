@@ -12,8 +12,6 @@
 
 #include "command.h"
 
-#define GAIN(v) powf(10.0, v / 20.0)
-
 struct Port;
 
 class FilterChain {
