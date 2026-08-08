@@ -190,8 +190,8 @@ bool App::ui_render() {
     return true;
 }
 
-#define GAIN_INPUT changed |= ImGui::DragFloat("Gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
-#define CENTER_FREQ changed |= ImGui::DragFloat("Center Frequency", &command.audio.center_freq, 12.0f, 1.0f, 22000.0f, "%.2f Hz", ImGuiSliderFlags_Logarithmic)
+#define GAIN_INPUT ImGui::DragFloat("Gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
+#define CENTER_FREQ ImGui::DragFloat("Center Frequency", &command.audio.center_freq, 12.0f, 1.0f, 22000.0f, "%.2f Hz", ImGuiSliderFlags_Logarithmic)
 #define QFAC ImGui::DragFloat("Q Factor", &command.audio.q, .1, .333f, 33.333f)
 #define BANDWIDTH ImGui::DragFloat("Bandwith", &command.audio.bandwidth, .1, .01f, 20.0f, "%.2f oct")
 #define FIXED_S_CALC float A = powf(10.0, command.audio.gain/40.0); \
@@ -200,7 +200,7 @@ bool App::ui_render() {
 bool App::rack_preamp(Command& command) {
     bool changed = false;
     ImGui::Text("Preamp");
-    changed = GAIN_INPUT;
+    changed |= GAIN_INPUT;
     ImGui::SameLine();
     if(ImGui::Button("Level to peak gain")) {
         command.audio.gain -= peak_gain;
@@ -214,7 +214,7 @@ bool App::rack_pk(Command& command) {
     bool changed = false;
     ImGui::Text("Peaking");
     changed |= GAIN_INPUT;
-    CENTER_FREQ;
+    changed |= CENTER_FREQ;
     if(!command.audio.use_bandwith) {
         if(QFAC) {
             command.audio.update_bandwidth();
@@ -237,8 +237,8 @@ bool App::rack_shelf(Command& command, bool is_low) {
     bool changed = false;
     if(is_low) ImGui::Text("Low Shelf");
     else ImGui::Text("High Shelf");
-    GAIN_INPUT;
-    CENTER_FREQ;
+    changed |= GAIN_INPUT;
+    changed |= CENTER_FREQ;
     bool combo = false;
     switch(command.audio.shaper) {
     case ShelfShaper::Q:
