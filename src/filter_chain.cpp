@@ -284,36 +284,35 @@ void FilterChain::maybe_create_links() {
             if(proxy) {
                 stream_nodes.insert_or_assign(id, false);
                 pw_registry_destroy(registry, id);
+                WpProperties* inter_link_props = wp_properties_new(
+                    PW_KEY_LINK_OUTPUT_NODE, std::to_string(sink_id).c_str(),
+                    PW_KEY_LINK_INPUT_NODE,  std::to_string(pw_filter_get_node_id(filter)).c_str(),
+                    NULL);
+
+                WpLink* link = wp_link_new_from_factory(core, "link-factory", inter_link_props);
+                wp_object_activate(WP_OBJECT(link), WP_PROXY_FEATURE_BOUND, NULL,
+                    (GAsyncReadyCallback)[](GObject *obj, GAsyncResult *res, gpointer data) {
+                        g_autoptr(GError) error = NULL;
+                        if (!wp_object_activate_finish(WP_OBJECT(obj), res, &error)) {
+                            std::cerr << "Link activation failed: " << error->message << std::endl;
+                        }
+                    }, nullptr);
+
+                WpProperties* link_props = wp_properties_new(
+                    PW_KEY_LINK_OUTPUT_NODE, std::to_string(pw_filter_get_node_id(filter)).c_str(),
+                    PW_KEY_LINK_INPUT_NODE, std::to_string(device_node_id).c_str(),
+                    NULL);
+                link = wp_link_new_from_factory(core, "link-factory", link_props);
+                wp_object_activate(WP_OBJECT(link), WP_PROXY_FEATURE_BOUND, NULL,
+                    (GAsyncReadyCallback)[](GObject *obj, GAsyncResult *res, gpointer data) {
+                        g_autoptr(GError) error = NULL;
+                        if (!wp_object_activate_finish(WP_OBJECT(obj), res, &error)) {
+                            std::cerr << "Link activation failed: " << error->message << std::endl;
+                        }
+                    }, nullptr);
             }
             g_value_unset(&item);
         }
         wp_iterator_unref(it);
     }
-
-    WpProperties* inter_link_props = wp_properties_new(
-        PW_KEY_LINK_OUTPUT_NODE, std::to_string(sink_id).c_str(),
-        PW_KEY_LINK_INPUT_NODE,  std::to_string(pw_filter_get_node_id(filter)).c_str(),
-        NULL);
-
-    WpLink* link = wp_link_new_from_factory(core, "link-factory", inter_link_props);
-    wp_object_activate(WP_OBJECT(link), WP_PROXY_FEATURE_BOUND, NULL,
-        (GAsyncReadyCallback)[](GObject *obj, GAsyncResult *res, gpointer data) {
-            g_autoptr(GError) error = NULL;
-            if (!wp_object_activate_finish(WP_OBJECT(obj), res, &error)) {
-                std::cerr << "Link activation failed: " << error->message << std::endl;
-            }
-        }, nullptr);
-
-    WpProperties* link_props = wp_properties_new(
-        PW_KEY_LINK_OUTPUT_NODE, std::to_string(pw_filter_get_node_id(filter)).c_str(),
-        PW_KEY_LINK_INPUT_NODE, std::to_string(device_node_id).c_str(),
-        NULL);
-    link = wp_link_new_from_factory(core, "link-factory", link_props);
-    wp_object_activate(WP_OBJECT(link), WP_PROXY_FEATURE_BOUND, NULL,
-        (GAsyncReadyCallback)[](GObject *obj, GAsyncResult *res, gpointer data) {
-            g_autoptr(GError) error = NULL;
-            if (!wp_object_activate_finish(WP_OBJECT(obj), res, &error)) {
-                std::cerr << "Link activation failed: " << error->message << std::endl;
-            }
-        }, nullptr);
 }
