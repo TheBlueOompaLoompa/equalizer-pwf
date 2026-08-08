@@ -230,7 +230,9 @@ void Equalizer::rebuild_device_list() {
         wp_properties_unref(props);
         g_value_unset(&item);
     }
-    wp_iterator_unref(it);
+    // TODO: This is causing a memory leak, but not important enough to worry about right now
+    // this is for temporary issue solving, don't keep this please :(
+    //wp_iterator_unref(it);
 }
 
 void Equalizer::on_object_added(gpointer object) {
