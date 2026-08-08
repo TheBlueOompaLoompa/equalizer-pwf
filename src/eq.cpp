@@ -146,6 +146,7 @@ void Equalizer::on_timeout() {
             for(auto& chain : filter_chains) {
                 chain.second->update_filters();
                 update_chain_response(chain);
+                chain.second->maybe_create_links();
             }
             ui_channel->send_if_unique({
                 .type = MsgType::FREQ_RESPONSE_COMPUTED,

@@ -45,7 +45,6 @@ void on_process(void* userdata, struct spa_io_position *position) {
             continue;
         chain->processing_channels = 0x1ff;
         for(auto& command : *chain->commands) {
-            std::cout << command.type << std::endl;
             chain->process(command, channel.first, in, out, n_samples);
         }
     }

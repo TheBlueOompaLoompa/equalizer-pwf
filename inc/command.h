@@ -17,8 +17,10 @@ enum CommandType {
     LOW_SHELF,
     HIGH_SHELF,
     CHANNEL,
+    COLOR,
+    COMMENT,
 };
-#define IS_FILTER_COMMAND_TYPE(type) (type != CommandType::PREAMP && type != CommandType::CHANNEL)
+#define IS_FILTER_COMMAND_TYPE(type) (type != CommandType::PREAMP && type != CommandType::CHANNEL && type != CommandType::COLOR && type != CommandType::COMMENT)
 
 enum ShelfShaper {
     Q,
@@ -88,6 +90,8 @@ public:
             }
             break;
         case CommandType::CHANNEL:
+        case CommandType::COLOR:
+        case CommandType::COMMENT:
             break;
         default:
             if(audio.chain_filters->find(device_id) != audio.chain_filters->end() && (*audio.chain_filters)[device_id].find(channel) != (*audio.chain_filters)[device_id].end())
@@ -115,7 +119,7 @@ private:
     void update_filter(Filter* &filter_ref) {
         if(filter_ref == nullptr) {
             filter_ref = new Filter();
-            std::cout << "New filter" << std::endl;
+            //std::cout << "New filter" << std::endl;
         }
         switch(type) {
         case CommandType::PEAKING:

@@ -30,6 +30,7 @@ App::App() {
     
     Config::deserialize_config(config_path.c_str(), commands);
     for(const auto command : commands) {
+        if(command.type == CommandType::COLOR || command.type == CommandType::COMMENT) continue;
         equalizer->commands.push_back(command);
     }
 
@@ -156,6 +157,9 @@ bool App::ui_render() {
             break;
         case CommandType::CHANNEL:
             changed = rack_channel(commands[i]);
+            break;
+        case CommandType::COLOR:
+            ImGui::Text("colers");
             break;
         }
         if(changed) {
@@ -412,6 +416,17 @@ void App::add_filter_menu(int pos) {
                 eq_channel->send_if_unique({
                     .type = MsgType::COMMANDS_CHANGED,
                 });
+                command_added = true;
+            }
+            ImGui::EndMenu();
+        }
+        if(ImGui::BeginMenu("Other")) {
+            if(ImGui::MenuItem("Color")) {
+                Command cmd = {
+                    .type = CommandType::COLOR,
+                    .channels = 0
+                };
+                commands.insert(commands.begin() + pos, cmd);
                 command_added = true;
             }
             ImGui::EndMenu();
