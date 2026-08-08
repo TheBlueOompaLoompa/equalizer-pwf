@@ -131,6 +131,10 @@ void Equalizer::update_chain_response(std::pair<const uint32_t, FilterChain*> &c
 
 void Equalizer::on_timeout() {
     Msg* msg = eq_channel->receive();
+    for(auto& chain : filter_chains) {
+        //TODO: Don't run this on a timer, somehow make it work based on link events
+        chain.second->maybe_create_links();
+    }
     if(msg != nullptr) {
         switch(msg->type) {
         case MsgType::QUIT:
@@ -146,7 +150,6 @@ void Equalizer::on_timeout() {
             for(auto& chain : filter_chains) {
                 chain.second->update_filters();
                 update_chain_response(chain);
-                chain.second->maybe_create_links();
             }
             ui_channel->send_if_unique({
                 .type = MsgType::FREQ_RESPONSE_COMPUTED,
