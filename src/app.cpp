@@ -28,10 +28,6 @@ App::App() {
     for(const auto command : commands) {
         equalizer->commands.push_back(command);
     }
-    eq_channel->send({
-        .type = MsgType::COMMANDS_CHANGED,
-    });
-    update_response_samples();
 
     App::instance = this;
     std::signal(SIGINT, sigint);
@@ -162,10 +158,9 @@ bool App::ui_render() {
             equalizer->commands_mutex.lock();
             equalizer->commands[i] = commands[i];
             equalizer->commands_mutex.unlock();
-            eq_channel->send({
+            eq_channel->send_if_unique({
                 .type = MsgType::COMMANDS_CHANGED,
             });
-            update_response_samples();
             Config::serialize_config(config_path.c_str(), commands);
         }
         if(ImGui::Button("Delete")) {
@@ -173,7 +168,9 @@ bool App::ui_render() {
             equalizer->commands_mutex.lock();
             equalizer->commands.erase(equalizer->commands.begin() + i);
             equalizer->commands_mutex.unlock();
-            update_response_samples();
+            eq_channel->send_if_unique({
+                .type = MsgType::COMMANDS_CHANGED,
+            });
             Config::serialize_config(config_path.c_str(), commands);
         }
         ImGui::PopID();
@@ -330,7 +327,7 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
-                eq_channel->send({
+                eq_channel->send_if_unique({
                     .type = MsgType::COMMANDS_CHANGED,
                 });
                 command_added = true;
@@ -352,7 +349,7 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
-                eq_channel->send({
+                eq_channel->send_if_unique({
                     .type = MsgType::COMMANDS_CHANGED,
                 });
                 command_added = true;
@@ -371,7 +368,7 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
-                eq_channel->send({
+                eq_channel->send_if_unique({
                     .type = MsgType::COMMANDS_CHANGED,
                 });
                 command_added = true;
@@ -391,7 +388,7 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
-                eq_channel->send({
+                eq_channel->send_if_unique({
                     .type = MsgType::COMMANDS_CHANGED,
                 });
                 command_added = true;
@@ -408,7 +405,7 @@ void App::add_filter_menu(int pos) {
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
                 equalizer->commands_mutex.unlock();
-                eq_channel->send({
+                eq_channel->send_if_unique({
                     .type = MsgType::COMMANDS_CHANGED,
                 });
                 command_added = true;
@@ -439,6 +436,7 @@ void quit_callback(void* app, SDL_TrayEntry* _entry) {
 
 static bool tray_created = false;
 static SDL_Surface* tray_icon_surface = nullptr;
+
 
 void App::ui_start() {
     last_hide_window = true;
@@ -655,26 +653,27 @@ float to_db(float m) {
 }
 
 void App::update_response_samples() {
-    equalizer->responses_mutex.lock();
-    bool unlocked = false;
-    if(equalizer->responses.find(selected_device) != equalizer->responses.end() && equalizer->responses[selected_device].find(devices[selected_device].channels[selected_channel]) != equalizer->responses[selected_device].end()) {
-        memcpy(resp_samples, equalizer->responses[selected_device][devices[selected_device].channels[selected_channel]], sizeof(resp_samples));
-        equalizer->responses_mutex.unlock();
-        unlocked = true;
+    if(equalizer->responses_mutex.try_lock()) {
+        bool unlocked = false;
+        if(equalizer->responses.find(selected_device) != equalizer->responses.end() && equalizer->responses[selected_device].find(devices[selected_device].channels[selected_channel]) != equalizer->responses[selected_device].end()) {
+            memcpy(resp_samples, equalizer->responses[selected_device][devices[selected_device].channels[selected_channel]], sizeof(resp_samples));
+            equalizer->responses_mutex.unlock();
+            unlocked = true;
 
-        peak_gain = -9999.0;
-        for(int i = 0; i < 22000/2; i++) {
-            resp_samples_x[i] = i * 2 + 1;
-            if(peak_gain < resp_samples[i]) peak_gain = resp_samples[i];
-            if(resp_samples[i] > 0.0f) {
-                bad_resp_samples[i] = resp_samples[i];
-                resp_samples[i] = 0.0f;
-            }else {
-                bad_resp_samples[i] = 0.0f;
+            peak_gain = -9999.0;
+            for(int i = 0; i < 22000/2; i++) {
+                resp_samples_x[i] = i * 2 + 1;
+                if(peak_gain < resp_samples[i]) peak_gain = resp_samples[i];
+                if(resp_samples[i] > 0.0f) {
+                    bad_resp_samples[i] = resp_samples[i];
+                    resp_samples[i] = 0.0f;
+                }else {
+                    bad_resp_samples[i] = 0.0f;
+                }
             }
         }
+        if(!unlocked) equalizer->responses_mutex.unlock();
     }
-    if(!unlocked) equalizer->responses_mutex.unlock();
 }
 
 void App::on_show_window() {

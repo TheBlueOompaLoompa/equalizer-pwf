@@ -9,6 +9,7 @@
 #include <cmath>
 #include <glib.h>
 #include <iostream>
+#include <utility>
 #include <wp/iterator.h>
 #include <wp/node.h>
 #include <wp/port.h>
@@ -25,6 +26,11 @@ void Equalizer::on_device_node_added(gpointer object) {
     uint32_t n_inputs = wp_node_get_n_input_ports(WP_NODE(object), nullptr);
     filter_chains.insert_or_assign(id, new FilterChain(pw_core, core, registry, om, object, n_inputs, &commands));
     FilterChain* chain = filter_chains[id];
+    std::pair<const uint32_t, FilterChain*> pair(id, chain);
+    update_chain_response(pair);
+    ui_channel->send_if_unique({
+        .type = MsgType::FREQ_RESPONSE_COMPUTED,
+    });
 }
 
 void Equalizer::on_device_node_removed(gpointer object) {
@@ -96,6 +102,33 @@ void Equalizer::loop() {
     g_main_loop_unref(main_loop);
 }
 
+void Equalizer::update_chain_response(std::pair<const uint32_t, FilterChain*> &chain) {
+    responses_mutex.lock();
+    if(responses.find(chain.first) == responses.end())
+        responses.insert_or_assign(chain.first, std::unordered_map<std::string, float*>());
+    for(auto& channel: chain.second->input_ports) {
+        if(responses[chain.first].find(channel.first) == responses[chain.first].end())
+            responses[chain.first].insert_or_assign(channel.first, (float*)malloc(22000/2*sizeof(float)));
+        for(int i = 0; i < 22000/2; i++) {
+            bool channel_enabled = true;
+            int fq = i*2 + 1;
+            responses[chain.first][channel.first][i] = 0;
+            for(auto& command : commands) {
+                switch(command.type) {
+                case CommandType::CHANNEL:
+                    channel_enabled = command.has_channel(channel.first);
+                    break;
+                default:
+                    if(channel_enabled)
+                        responses[chain.first][channel.first][i] += command.responseDb(chain.first, channel.first, fq);
+                    break;
+                }
+            }
+        }
+    }
+    responses_mutex.unlock();
+}
+
 void Equalizer::on_timeout() {
     Msg* msg = eq_channel->receive();
     if(msg != nullptr) {
@@ -112,32 +145,9 @@ void Equalizer::on_timeout() {
         case MsgType::COMMANDS_CHANGED:
             for(auto& chain : filter_chains) {
                 chain.second->update_filters();
-                responses_mutex.lock();
-                if(responses.find(chain.first) == responses.end())
-                    responses.insert_or_assign(chain.first, std::unordered_map<std::string, float*>());
-                for(auto& channel: chain.second->input_ports) {
-                    if(responses[chain.first].find(channel.first) == responses[chain.first].end())
-                        responses[chain.first].insert_or_assign(channel.first, (float*)malloc(22000/2*sizeof(float)));
-                    bool channel_enabled = true;
-                    for(int i = 0; i < 22000/2; i++) {
-                        int fq = i*2 + 1;
-                        responses[chain.first][channel.first][i] = 0;
-                        for(auto& command : commands) {
-                            switch(command.type) {
-                            case CommandType::CHANNEL:
-                                channel_enabled = command.has_channel(channel.first);
-                                break;
-                            default:
-                                if(channel_enabled)
-                                    responses[chain.first][channel.first][i] += command.responseDb(chain.first, channel.first, fq);
-                                break;
-                            }
-                        }
-                    }
-                }
-                responses_mutex.unlock();
+                update_chain_response(chain);
             }
-            ui_channel->send({
+            ui_channel->send_if_unique({
                 .type = MsgType::FREQ_RESPONSE_COMPUTED,
             });
             break;

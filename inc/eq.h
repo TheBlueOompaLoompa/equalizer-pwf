@@ -59,5 +59,6 @@ private:
     void on_device_node_removed(gpointer object);
     void on_port_changed(uint32_t node_id);
     void on_port_added(uint32_t node_id);
+    void update_chain_response(std::pair<const uint32_t, FilterChain*> &chain);
     static gboolean timeout(gpointer data);
 };

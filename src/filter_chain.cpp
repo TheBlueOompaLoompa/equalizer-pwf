@@ -25,7 +25,6 @@
 void on_process(void* userdata, struct spa_io_position *position) {
     FilterChain* chain = static_cast<FilterChain*>(userdata);
     uint32_t n_samples = position->clock.duration;
-    chain->processing_channels = 0x1ff;
 
     if(chain->commands->size() == 0) {
         for(auto& channel : chain->input_ports) {
@@ -44,6 +43,7 @@ void on_process(void* userdata, struct spa_io_position *position) {
         out = static_cast<float*>(pw_filter_get_dsp_buffer(chain->output_ports[channel.first], n_samples));
         if (in == nullptr || out == nullptr)
             continue;
+        chain->processing_channels = 0x1ff;
         for(auto& command : *chain->commands) {
             chain->process(command, channel.first, in, out, n_samples);
         }
@@ -131,7 +131,7 @@ FilterChain::~FilterChain() {
 
 void FilterChain::process(Command& command, const std::string& channel, float* in, float* out, uint32_t n_samples) {
     memcpy(out, in, n_samples*sizeof(float));
-    if((processing_channels & (0b1 << 0)) == 0 && channel == "FL") return;
+    if((processing_channels & (0b1)) == 0 && channel == "FL") return;
     if((processing_channels & (0b1 << 1)) == 0 && channel == "FR") return;
     if((processing_channels & (0b1 << 2)) == 0 && channel == "C") return;
     if((processing_channels & (0b1 << 3)) == 0 && channel == "LFE") return;

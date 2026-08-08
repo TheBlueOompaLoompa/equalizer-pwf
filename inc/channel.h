@@ -12,6 +12,18 @@ public:
     Channel() {}
     ~Channel() {}
 
+    void send_if_unique(T msg) {
+        mut.lock();
+        for(auto& tmp_msg : msgs) {
+            if(tmp_msg.type == msg.type) {
+                mut.unlock();
+                return;
+            }
+        }
+        msgs.insert(msgs.begin(), msg);
+        mut.unlock();
+    }
+
     void send(T msg) {
         mut.lock();
         msgs.insert(msgs.begin(), msg);
