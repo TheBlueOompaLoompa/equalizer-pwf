@@ -57,12 +57,13 @@ public:
     };
 
     ~Command() {
-        if(type == CommandType::PREAMP || type == CommandType::CHANNEL) return;
-        for(auto& chain_set : *audio.chain_filters) {
-            for(auto& filter : chain_set.second) {
-                if(filter.second != nullptr) {
-                    delete filter.second;
-                    filter.second = nullptr;
+        if(IS_FILTER_COMMAND_TYPE(type)) {
+            for(auto& chain_set : *audio.chain_filters) {
+                for(auto& filter : chain_set.second) {
+                    if(filter.second != nullptr) {
+                        delete filter.second;
+                        filter.second = nullptr;
+                    }
                 }
             }
         }
