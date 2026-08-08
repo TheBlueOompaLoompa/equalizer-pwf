@@ -28,8 +28,8 @@ public:
     Channel<Msg>* eq_channel;
     Channel<Msg>* ui_channel;
 
-    std::vector<Command> commands;
     std::mutex commands_mutex;
+    std::vector<Command> commands;
     std::mutex responses_mutex;
     std::unordered_map<uint32_t, std::unordered_map<std::string, float*>> responses;
 

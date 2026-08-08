@@ -548,6 +548,9 @@ void App::ui_loop() {
             quit();
             break;
         case MsgType::DEVICE_LIST:
+            for(auto& device : devices) {
+                free((void*)device.second.desc);
+            }
             devices.clear();
             for(auto device : *static_cast<std::vector<PwDevice>*>(msg->data)) {
                 PwDevice new_device = device;
