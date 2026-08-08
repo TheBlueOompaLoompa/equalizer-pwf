@@ -174,8 +174,6 @@ bool App::ui_render() {
         if(ImGui::Button("Delete")) {
             Config::serialize_config(config_path.c_str(), commands);
             commands.erase(commands.begin() + i);
-            if(commands[i].type == CommandType::COLOR || commands[i].type == CommandType::COMMENT) 
-                goto ui_only_delete_skip_label;
             equalizer->commands_mutex.lock();
             equalizer->commands.erase(equalizer->commands.begin() + i);
             equalizer->commands_mutex.unlock();
@@ -183,7 +181,6 @@ bool App::ui_render() {
                 .type = MsgType::COMMANDS_CHANGED,
             });
         }
-ui_only_delete_skip_label:
         ImGui::PopID();
         ImGui::Separator();
     }
@@ -430,6 +427,9 @@ void App::add_filter_menu(int pos) {
                     .channels = 0
                 };
                 commands.insert(commands.begin() + pos, cmd);
+                equalizer->commands_mutex.lock();
+                equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
+                equalizer->commands_mutex.unlock();
                 command_added = true;
             }
             ImGui::EndMenu();
