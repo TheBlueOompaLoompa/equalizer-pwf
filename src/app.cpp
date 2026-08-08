@@ -12,6 +12,7 @@
 #include <SDL3/SDL_surface.h>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 
 App::App() {
     ui_done = false;
@@ -21,8 +22,11 @@ App::App() {
 
     equalizer = new Equalizer(eq_channel, ui_channel);
 
-    config_path = std::string(getenv("HOME"));
-    config_path.append("/eq-config.txt");
+    const char* config_env = getenv("XDG_CONFIG_HOME");
+    if(config_env == nullptr) config_path = std::string(getenv("HOME")) + "/.config/equalizer-pwf";
+    else config_path = std::string(config_env) + "/equalizer-pwf";
+    std::filesystem::create_directory(config_path);
+    config_path.append("/config.txt");
     
     Config::deserialize_config(config_path.c_str(), commands);
     for(const auto command : commands) {
