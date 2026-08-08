@@ -165,8 +165,11 @@ gboolean Equalizer::timeout(gpointer data) {
 }
 
 void Equalizer::rebuild_device_list() {
-    for(auto &dev : devices)
+    for(auto &dev : devices) {
+        if(dev.desc == nullptr) continue;
         free((void*)dev.desc);
+        dev.desc = nullptr;
+    }
     devices.clear();
 
     WpIterator *it = wp_object_manager_new_filtered_iterator(om,
