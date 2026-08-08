@@ -555,8 +555,8 @@ void App::ui_loop() {
             for(auto device : *static_cast<std::vector<PwDevice>*>(msg->data)) {
                 PwDevice new_device = device;
                 size_t len = strlen(new_device.desc);
-                new_device.desc = (const char*)malloc(+1);
-                strncpy((char*)new_device.desc, device.desc, len);
+                new_device.desc = (const char*)malloc(len+1);
+                strncpy((char*)new_device.desc, device.desc, len+1);
                 devices.insert_or_assign(new_device.id, new_device);
             }
             break;
