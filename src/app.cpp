@@ -163,24 +163,27 @@ bool App::ui_render() {
             break;
         }
         if(changed) {
+            Config::serialize_config(config_path.c_str(), commands);
             equalizer->commands_mutex.lock();
             equalizer->commands[i] = commands[i];
             equalizer->commands_mutex.unlock();
             eq_channel->send_if_unique({
                 .type = MsgType::COMMANDS_CHANGED,
             });
-            Config::serialize_config(config_path.c_str(), commands);
         }
         if(ImGui::Button("Delete")) {
+            Config::serialize_config(config_path.c_str(), commands);
             commands.erase(commands.begin() + i);
+            if(commands[i].type == CommandType::COLOR || commands[i].type == CommandType::COMMENT) 
+                goto ui_only_delete_skip_label;
             equalizer->commands_mutex.lock();
             equalizer->commands.erase(equalizer->commands.begin() + i);
             equalizer->commands_mutex.unlock();
             eq_channel->send_if_unique({
                 .type = MsgType::COMMANDS_CHANGED,
             });
-            Config::serialize_config(config_path.c_str(), commands);
         }
+ui_only_delete_skip_label:
         ImGui::PopID();
         ImGui::Separator();
     }
