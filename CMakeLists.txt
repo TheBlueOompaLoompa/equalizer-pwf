@@ -4,6 +4,9 @@ project(equalizer-pwf)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -g")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+add_compile_options(-fsanitize=address)
+add_link_options(-fsanitize=address)
+
 set(IMGUI_DIR ${PROJECT_SOURCE_DIR}/imgui)
 set(IMPLOT_DIR ${PROJECT_SOURCE_DIR}/implot)
 set(DSP_DIR ${PROJECT_SOURCE_DIR}/dsp)
