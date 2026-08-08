@@ -190,7 +190,7 @@ bool App::ui_render() {
     return true;
 }
 
-#define GAIN_INPUT ImGui::DragFloat("Gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
+#define GAIN_INPUT changed |= ImGui::DragFloat("Gain", &command.audio.gain, .1, -20.0f, 20.0f, "%.2f dB")
 #define CENTER_FREQ changed |= ImGui::DragFloat("Center Frequency", &command.audio.center_freq, 12.0f, 1.0f, 22000.0f, "%.2f Hz", ImGuiSliderFlags_Logarithmic)
 #define QFAC ImGui::DragFloat("Q Factor", &command.audio.q, .1, .333f, 33.333f)
 #define BANDWIDTH ImGui::DragFloat("Bandwith", &command.audio.bandwidth, .1, .01f, 20.0f, "%.2f oct")
