@@ -197,7 +197,7 @@ void Equalizer::rebuild_device_list() {
             size_t len = strlen(desc_str);
             char *desc_copy = (char*)malloc(len + 1);
             memcpy(desc_copy, desc_str, len + 1);
-            uint8_t channel_count = 0;
+            uint8_t channel_count = 1;
             for(size_t i = 0; positions_str[i] != '\0'; i++) {
                 if(positions_str[i] == ',') channel_count++;
             }
@@ -212,7 +212,7 @@ void Equalizer::rebuild_device_list() {
             for(size_t i = 0; positions_str[i] != '\0'; i++) {
                 if(positions_str[i] > 'A' && positions_str[i] < 'Z')
                     channel_list[channel_naming][ch++] = positions_str[i];
-                else if(positions_str[i] == ',') {channel_count++;
+                else if(positions_str[i] == ',') {
                     channel_list[++channel_naming] = (char*)malloc(4);
                     ch = 0;
                     channel_list[channel_naming][2] = 0;
