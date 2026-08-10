@@ -149,7 +149,8 @@ void Equalizer::on_timeout() {
         case MsgType::COMMANDS_CHANGED:
             for(auto& chain : filter_chains) {
                 chain.second->update_filters();
-                update_chain_response(chain);
+                // TODO: Do this in app thread for only selected channel/device
+                update_chain_response(chain); // Recalculate response graph
             }
             ui_channel->send_if_unique({
                 .type = MsgType::FREQ_RESPONSE_COMPUTED,
