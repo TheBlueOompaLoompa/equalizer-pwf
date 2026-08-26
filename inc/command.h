@@ -48,13 +48,91 @@ struct AudioFilterConfig {
     }
 };
 
+struct Comment {
+    char* text;
+    size_t size;
+};
+
 class Command {
 public:
     CommandType type;
     union {
         AudioFilterConfig audio;
         uint16_t channels;
+        Comment* comment;
+        struct {
+            float r;
+            float g;
+            float b;
+        } color;
     };
+
+    Command(CommandType t, AudioFilterConfig a) {
+        type = t;
+        audio = a;
+    }
+
+    Command(CommandType t, uint16_t ch) {
+        type = t;
+        channels = ch;
+    }
+
+    Command(CommandType t, Comment* cm) {
+        type = t;
+        comment = cm;
+    }
+
+    Command(CommandType t, float r, float g, float b) {
+        type = t;
+        color.r = r;
+        color.g = g;
+        color.b = b;
+    }
+
+    Command(const Command& other) {
+        type = other.type;
+        switch(other.type) {
+        case CommandType::COMMENT:
+            comment = (Comment*)malloc(sizeof(Comment));
+            comment->text = (char*)malloc(other.comment->size);
+            comment->size = other.comment->size;
+            memcpy(comment->text, other.comment->text, other.comment->size);
+            break;
+        case CommandType::CHANNEL:
+            channels = other.channels;
+            break;
+        default:
+            audio = other.audio;
+            break;
+        }
+    }
+
+    Command& operator=(const Command& other) {
+        if(this == &other) return *this;
+        if(type == CommandType::COMMENT) {
+            if(comment != nullptr) {
+                if(comment->text != nullptr) free(comment->text);
+                free(comment);
+                comment = nullptr;
+            }
+        }
+        type = other.type;
+        switch(other.type) {
+        case CommandType::COMMENT:
+            comment = (Comment*)malloc(sizeof(Comment));
+            comment->text = (char*)malloc(other.comment->size);
+            comment->size = other.comment->size;
+            memcpy(comment->text, other.comment->text, other.comment->size);
+            break;
+        case CommandType::CHANNEL:
+            channels = other.channels;
+            break;
+        default:
+            audio = other.audio;
+            break;
+        }
+        return *this;
+    }
 
     ~Command() {
         if(IS_FILTER_COMMAND_TYPE(type)) {
@@ -65,6 +143,12 @@ public:
                         filter.second = nullptr;
                     }
                 }
+            }
+        }else if(type == CommandType::COMMENT) {
+            if(comment != nullptr) {
+                if(comment->text != nullptr) free(comment->text);
+                free(comment);
+                comment = nullptr;
             }
         }
     }

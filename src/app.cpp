@@ -7,7 +7,7 @@
 #include "implot.h"
 #include "msg.h"
 #include "pw_types.h"
-#include "config.h"
+#include "config.hpp"
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_surface.h>
 #include <cstdio>
@@ -30,7 +30,6 @@ App::App() {
     
     Config::deserialize_config(config_path.c_str(), commands);
     for(const auto command : commands) {
-        if(command.type == CommandType::COLOR || command.type == CommandType::COMMENT) continue;
         equalizer->commands.push_back(command);
     }
 
@@ -137,53 +136,93 @@ bool App::ui_render() {
     ImGui::BeginListBox("##Commands", ImVec2(-1.0, -1.0));
 
     bool combo = false;
+    bool color = false;
     for(int i = 0; i < commands.size(); i++) {
-        ImGui::PushID(i);
         bool changed = false;
-        add_filter_menu(i);
-        ImGui::Separator();
+        if(commands[i].type != CommandType::COLOR) {
+            ImGui::PushID(i);
+            ImGui::BeginChild("##xx", ImVec2(0.0, 0.0), ImGuiChildFlags_FrameStyle | ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_None);
+            add_filter_menu(i);
+            add_color_picker(i);
+            ImGui::SameLine();
+        }
+        Command& cmd = commands[i];
         switch(commands[i].type) {
         case CommandType::PREAMP:
-            changed = rack_preamp(commands[i]);
+            changed = rack_preamp(cmd);
             break;
         case CommandType::PEAKING:
-            changed = rack_pk(commands[i]);
+            changed = rack_pk(cmd);
             break;
         case CommandType::LOW_SHELF:
-            changed = rack_shelf(commands[i], true);
+            changed = rack_shelf(cmd, true);
             break;
         case CommandType::HIGH_SHELF:
-            changed = rack_shelf(commands[i], false);
+            changed = rack_shelf(cmd, false);
             break;
         case CommandType::CHANNEL:
-            changed = rack_channel(commands[i]);
+            changed = rack_channel(cmd);
             break;
         case CommandType::COLOR:
-            ImGui::Text("colers");
+            {
+                ImGuiStyle& style = ImGui::GetStyle();
+                style.Colors[ImGuiCol_Button] = ImVec4(cmd.color.r, cmd.color.g, cmd.color.b, style.Colors[ImGuiCol_Button].w);
+                style.Colors[ImGuiCol_FrameBg] = ImVec4(cmd.color.r, cmd.color.g, cmd.color.b, style.Colors[ImGuiCol_FrameBg].w/2.0);
+                color = true;
+            }
+            break;
+        case CommandType::COMMENT:
+            changed = rack_comment(cmd);
+            break;
+        default:
+            ImGui::Text("Unhandled command type: %i", cmd.type);
             break;
         }
-        if(changed) {
-            Config::serialize_config(config_path.c_str(), commands);
-            equalizer->commands_mutex.lock();
-            equalizer->commands[i] = commands[i];
-            equalizer->commands_mutex.unlock();
-            eq_channel->send_if_unique({
-                .type = MsgType::COMMANDS_CHANGED,
-            });
+        if(cmd.type != CommandType::COLOR) {
+            if(changed) {
+                Config::serialize_config(config_path.c_str(), commands);
+                equalizer->commands_mutex.lock();
+                equalizer->commands[i] = commands[i];
+                equalizer->commands_mutex.unlock();
+                eq_channel->send_if_unique({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+            }
+            if(ImGui::Button("Delete")) {
+                if(i > 0 && commands[i-1].type == CommandType::COLOR) {
+                    commands.erase(commands.begin() + i - 1);
+                    equalizer->commands_mutex.lock();
+                    equalizer->commands.erase(equalizer->commands.begin() + i - 1);
+                    equalizer->commands_mutex.unlock();
+                    eq_channel->send_if_unique({
+                        .type = MsgType::COMMANDS_CHANGED,
+                    });
+                    i--;
+                }
+
+                commands.erase(commands.begin() + i);
+                equalizer->commands_mutex.lock();
+                equalizer->commands.erase(equalizer->commands.begin() + i);
+                equalizer->commands_mutex.unlock();
+                eq_channel->send_if_unique({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                Config::serialize_config(config_path.c_str(), commands);
+                i--;
+            }
+            ImGui::EndChild();
+            ImGui::PopID();
+            ImGui::Separator();
         }
-        if(ImGui::Button("Delete")) {
-            Config::serialize_config(config_path.c_str(), commands);
-            commands.erase(commands.begin() + i);
-            equalizer->commands_mutex.lock();
-            equalizer->commands.erase(equalizer->commands.begin() + i);
-            equalizer->commands_mutex.unlock();
-            eq_channel->send_if_unique({
-                .type = MsgType::COMMANDS_CHANGED,
-            });
+        if(cmd.type != CommandType::COLOR && color) {
+            color = false;
+            ImGuiStyle& style = ImGui::GetStyle();
+            style = default_style;
         }
-        ImGui::PopID();
-        ImGui::Separator();
     }
+
+    ImGuiStyle& style = ImGui::GetStyle();
+    style = default_style;
 
     add_filter_menu(commands.size());
 
@@ -320,17 +359,34 @@ bool App::rack_channel(Command& command) {
     return changed;
 }
 
+struct CommentEdit {
+    Comment* comment;
+};
+
+static int comment_resize_callback(ImGuiInputTextCallbackData* data) {
+    if(data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+        CommentEdit* edit = (CommentEdit*)data->UserData;
+        edit->comment->size = data->BufSize;
+        edit->comment->text = (char*)realloc((void*)edit->comment->text, data->BufSize);
+        data->Buf = edit->comment->text;
+    }
+    return 0;
+}
+
+bool App::rack_comment(Command& command) {
+    CommentEdit edit = { command.comment };
+    return ImGui::InputText("Comment", command.comment->text, command.comment->size,
+            ImGuiInputTextFlags_CallbackResize, comment_resize_callback, &edit);
+}
+
 void App::add_filter_menu(int pos) {
     bool command_added = false;
     if(ImGui::BeginMenu("Add Command")) {
         if(ImGui::BeginMenu("Basic Filters")) {
             if (ImGui::MenuItem("Preamp"))   {
-                Command cmd = {
-                    .type = CommandType::PREAMP,
-                    .audio = {
+                Command cmd = Command(CommandType::PREAMP, {
                         .gain = 0
-                    }
-                };
+                    });
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
@@ -344,15 +400,12 @@ void App::add_filter_menu(int pos) {
         }
         if(ImGui::BeginMenu("Parametric Filters")) {
             if (ImGui::MenuItem("Low Shelf Filter"))   {
-                Command cmd = {
-                    .type = CommandType::LOW_SHELF,
-                    .audio = {
+                Command cmd = Command(CommandType::LOW_SHELF, {
                         .gain = 0.0,
                         .center_freq = 100,
                         .q = 0.7,
                         .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
-                    }
-                };
+                    });
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
@@ -363,15 +416,12 @@ void App::add_filter_menu(int pos) {
                 command_added = true;
             }
             if (ImGui::MenuItem("High Shelf Filter"))   {
-                Command cmd = {
-                    .type = CommandType::HIGH_SHELF,
-                    .audio = {
+                Command cmd = Command(CommandType::HIGH_SHELF, {
                         .gain = 0.0,
                         .center_freq = 10000,
                         .q = 0.7,
                         .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
-                    }
-                };
+                    });
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
@@ -382,15 +432,12 @@ void App::add_filter_menu(int pos) {
                 command_added = true;
             }
             if (ImGui::MenuItem("Peaking Filter"))   {
-                Command cmd = {
-                    .type = CommandType::PEAKING,
-                    .audio = {
+                Command cmd = Command(CommandType::PEAKING, {
                         .gain = 0.0,
                         .center_freq = 100,
                         .q = 10.0,
                         .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
-                    }
-                };
+                    });
                 cmd.audio.update_bandwidth();
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
@@ -405,10 +452,7 @@ void App::add_filter_menu(int pos) {
         }
         if(ImGui::BeginMenu("Control")) {
             if(ImGui::MenuItem("Channel")) {
-                Command cmd = {
-                    .type = CommandType::CHANNEL,
-                    .channels = 0
-                };
+                Command cmd = Command(CommandType::CHANNEL, (uint16_t)0);
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
@@ -421,11 +465,13 @@ void App::add_filter_menu(int pos) {
             ImGui::EndMenu();
         }
         if(ImGui::BeginMenu("Other")) {
-            if(ImGui::MenuItem("Color")) {
-                Command cmd = {
-                    .type = CommandType::COLOR,
-                    .channels = 0
-                };
+            if(ImGui::MenuItem("Comment")) {
+                Comment* comment = (Comment*)malloc(sizeof(Comment));
+                comment->text = (char*)malloc(2);
+                comment->text[0] = 0;
+                comment->text[1] = 0;
+                comment->size = 2;
+                Command cmd = Command(CommandType::COMMENT, comment);
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
@@ -439,6 +485,37 @@ void App::add_filter_menu(int pos) {
 
     if(command_added) 
         Config::serialize_config(config_path.c_str(), commands);
+}
+
+void App::add_color_picker(int &i) {
+    float vals[3] = {default_style.Colors[ImGuiCol_Button].x, default_style.Colors[ImGuiCol_Button].y, default_style.Colors[ImGuiCol_Button].z};
+    if(i > 0 && equalizer->commands[i-1].type == CommandType::COLOR) {
+        Command& cmd = equalizer->commands[i-1];
+        vals[0] = cmd.color.r;
+        vals[1] = cmd.color.g;
+        vals[2] = cmd.color.b;
+    }
+    if(ImGui::ColorEdit3("##xx", vals, ImGuiColorEditFlags_NoInputs)) {
+        if(i == 0 || equalizer->commands[i-1].type != CommandType::COLOR) {
+            Command cmd = Command(CommandType::COLOR, (uint8_t)(vals[0]*255.0), (uint8_t)(vals[1]*255.0), (uint8_t)(vals[2]*255.0));
+            commands.insert(commands.begin() + i, cmd);
+            equalizer->commands_mutex.lock();
+            equalizer->commands.insert(equalizer->commands.begin() + i, cmd);
+            equalizer->commands_mutex.unlock();
+            i++;
+        }
+        commands[i-1].color.r = vals[0];
+        commands[i-1].color.g = vals[1];
+        commands[i-1].color.b = vals[2];
+
+        Config::serialize_config(config_path.c_str(), commands);
+        equalizer->commands_mutex.lock();
+        equalizer->commands[i-1] = commands[i-1];
+        equalizer->commands_mutex.unlock();
+        eq_channel->send_if_unique({
+            .type = MsgType::COMMANDS_CHANGED,
+        });
+    }
 }
 
 int App::loop() {
@@ -517,6 +594,7 @@ void App::ui_start() {
     ImGuiStyle& style = ImGui::GetStyle();
     style.ScaleAllSizes(main_scale);        // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting Style + calling this again)
     style.FontScaleDpi = main_scale;        // Set initial font scale. (in docking branch: using io.ConfigDpiScaleFonts=true automatically overrides this for every window depending on the current monitor)
+    default_style = style;
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL3_InitForSDLGPU(window);

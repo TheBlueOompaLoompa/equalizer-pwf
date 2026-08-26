@@ -58,6 +58,8 @@ private:
 
     std::string config_path;
 
+    ImGuiStyle default_style;
+
     void ui_event_handler(SDL_Event &event);
 
     void ui_start();
@@ -73,10 +75,12 @@ private:
     bool rack_shelf(Command& command, bool is_low);
     bool rack_ap(Command& command);
     bool rack_channel(Command& command);
+    bool rack_comment(Command& command);
 
     void update_response_samples();
 
     void add_filter_menu(int pos);
+    void add_color_picker(int &i);
 
     static inline void sigint(int s) { instance->quit(); }
 };

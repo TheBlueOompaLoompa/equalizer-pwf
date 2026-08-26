@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <ostream>
@@ -7,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "command.h"
 #include "eq.h"
 
 namespace Config{
@@ -16,37 +18,28 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
     while(iss >> cmdlet) {
         if(cmdlet.compare("LS") == 0) {
             type = CommandType::LOW_SHELF;
-            commands.push_back({
-                .type = type,
-                .audio = {
+            commands.push_back(Command(type, {
                     .gain = 0.0,
                     .center_freq = 100,
-                    .q = 10.0,
+                    .shaper = ShelfShaper::FIXED_S,
                     .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
-                }
-            });
+                }));
         }else if(cmdlet.compare("HS") == 0) {
             type = CommandType::HIGH_SHELF;
-            commands.push_back({
-                .type = type,
-                .audio = {
+            commands.push_back(Command(type, {
                     .gain = 0.0,
                     .center_freq = 100,
-                    .q = 10.0,
+                    .shaper = ShelfShaper::FIXED_S,
                     .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
-                }
-            });
+                }));
         }else if(cmdlet.compare("PK") == 0) {
             type = CommandType::PEAKING;
-            commands.push_back({
-                .type = type,
-                .audio = {
+            commands.push_back(Command(type, {
                     .gain = 0.0,
                     .center_freq = 100,
-                    .q = 10.0,
+                    .q = 3.0,
                     .chain_filters = new std::unordered_map<uint32_t, std::unordered_map<std::string, Filter*>>()
-                }
-            });
+                }));
         }else if(cmdlet.compare("Fc") == 0) {
             switch(type) {
             case CommandType::LOW_SHELF:
@@ -61,6 +54,7 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
             switch(type) {
             case CommandType::LOW_SHELF:
             case CommandType::HIGH_SHELF:
+                commands[commands.size()-1].audio.shaper = ShelfShaper::Q;
             case CommandType::PEAKING:
                 iss >> commands[commands.size()-1].audio.q;
                 break;
@@ -97,10 +91,25 @@ static void parse_channel(std::istringstream &iss, std::vector<Command>& command
         if(cmdlet == "SL") channels |= 1 << 7;
         if(cmdlet == "SR") channels |= 1 << 8;
     }
-    commands.push_back({
-        .type = CommandType::CHANNEL,
-        .channels = channels
-    });
+    commands.push_back(Command(CommandType::CHANNEL, channels));
+}
+
+static void parse_comment(std::string &line, std::vector<Command>& commands) {
+    Comment* comment = (Comment*)malloc(sizeof(Comment));
+    comment->size = line.size()+2;
+    comment->text = (char*)malloc(comment->size);
+    memcpy(comment->text, line.c_str(), comment->size-1);
+    commands.push_back(Command(CommandType::COMMENT, comment));
+}
+
+static void parse_color(std::istringstream &iss, std::vector<Command>& commands) {
+    uint32_t r, g, b;
+    iss >> r;
+    iss >> g;
+    iss >> b;
+    commands.push_back(Command(CommandType::COLOR, (float)r/255.0, (float)g/255.0, (float)b/255.0));
+    std::string temp;
+    while(iss >> temp) {}
 }
 
 static void deserialize_config(const char* path, std::vector<Command>& commands) {
@@ -112,11 +121,9 @@ static void deserialize_config(const char* path, std::vector<Command>& commands)
         std::string cmdlet;
         while(iss >> cmdlet) {
             if(cmdlet == "Preamp:") {
-                commands.push_back({
-                    .type = CommandType::PREAMP,
-                    .audio = { .gain = 0.0 }
-                });
+                commands.push_back(Command(CommandType::PREAMP, { .gain = 0.0 }));
                 iss >> commands[commands.size()-1].audio.gain;
+                while(iss >> cmdlet) {}
             }else if(cmdlet == "Filter:") {
                 parse_filter(iss, commands);
             }else if(cmdlet == "Filter") {
@@ -128,6 +135,11 @@ static void deserialize_config(const char* path, std::vector<Command>& commands)
                 }
             }else if(cmdlet == "Channel:") {
                 parse_channel(iss, commands);
+            }else if(cmdlet == "Color:") {
+                parse_color(iss, commands);
+            }else {
+                parse_comment(line, commands);
+                while(iss >> cmdlet) {}
             }
         }
     }
@@ -144,10 +156,12 @@ static void serialize_config(const char* path, std::vector<Command>& commands) {
                 file << "Preamp: " << command.audio.gain << " dB";
                 break;
             case CommandType::LOW_SHELF:
-                file << "Filter: ON LS Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain << " dB Q " << command.audio.q;
+                file << "Filter: ON LS Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain << " dB";
+                if(command.audio.shaper == ShelfShaper::Q) file << " Q " << command.audio.q;
                 break;
             case CommandType::HIGH_SHELF:
-                file << "Filter: ON HS Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain << " dB Q " << command.audio.q;
+                file << "Filter: ON HS Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain << " dB";
+                if(command.audio.shaper == ShelfShaper::Q) file << " Q " << command.audio.q;
                 break;
             case CommandType::PEAKING:
                 file << "Filter: ON PK Fc " << command.audio.center_freq << " Hz Gain " << command.audio.gain;
@@ -167,6 +181,12 @@ static void serialize_config(const char* path, std::vector<Command>& commands) {
                 if(command.channels & (1 << 6)) file << "RC ";
                 if(command.channels & (1 << 7)) file << "SL ";
                 if(command.channels & (1 << 8)) file << "SR ";
+                break;
+            case CommandType::COMMENT:
+                file << command.comment->text;
+                break;
+            case CommandType::COLOR:
+                file << "Color: " << (int)(command.color.r*255.0) << " " << (int)(command.color.g*255.0) << " " << (int)(command.color.b*255.0);
                 break;
             default:
                 std::cout << "Failed to save config param of type " << command.type << std::endl;

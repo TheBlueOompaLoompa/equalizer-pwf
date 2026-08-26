@@ -153,6 +153,9 @@ void FilterChain::process(Command& command, const std::string& channel, float* i
     case CommandType::CHANNEL:
         processing_channels = command.channels;
         break;
+    case CommandType::COMMENT:
+    case CommandType::COLOR:
+        break;
     default:
         if((*command.audio.chain_filters)[device_node_id][channel] != nullptr) {
             for(int i = 0; i < n_samples; i++) {
