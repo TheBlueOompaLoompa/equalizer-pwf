@@ -172,6 +172,9 @@ bool App::ui_render() {
         case CommandType::CHANNEL:
             changed = rack_channel(cmd);
             break;
+        case CommandType::COPY:
+            changed = rack_copy(cmd);
+            break;
         case CommandType::COLOR:
             {
                 ImGuiStyle& style = ImGui::GetStyle();
@@ -372,6 +375,48 @@ bool App::rack_channel(Command& command) {
     return changed;
 }
 
+bool App::rack_copy(Command& command) {
+    static const char* channel_names[9] = { "FL", "FR", "C", "LFE", "RL", "RR", "RC", "SL", "SR" };
+    bool changed = false;
+
+    ImGui::Text("Copy");
+
+    int to_channel = -1;
+    for(int i = 0; i < 9; i++) {
+        if(command.copy.to_channel & (1 << i)) {
+            to_channel = i;
+            break;
+        }
+    }
+
+    ImGui::Text("To:");
+    ImGui::PushID("to");
+    for(int i = 0; i < 9; i++) {
+        if(i > 0) ImGui::SameLine();
+        if(ImGui::RadioButton(channel_names[i], to_channel == i)) {
+            command.copy.to_channel = 1 << i;
+            changed = true;
+        }
+    }
+    ImGui::PopID();
+
+    ImGui::Text("From:");
+    ImGui::PushID("from");
+    for(int i = 0; i < 9; i++) {
+        bool enabled = (command.copy.from_channels & (1 << i)) > 0;
+        if(i > 0) ImGui::SameLine();
+        if(ImGui::Checkbox(channel_names[i], &enabled)) {
+            if(enabled) command.copy.from_channels |= 1 << i;
+            else command.copy.from_channels &= ~(1 << i);
+            changed = true;
+        }
+    }
+    ImGui::PopID();
+
+    return changed;
+}
+
+
 struct CommentEdit {
     Comment* comment;
 };
@@ -466,6 +511,17 @@ void App::add_filter_menu(int pos) {
         if(ImGui::BeginMenu("Control")) {
             if(ImGui::MenuItem("Channel")) {
                 Command cmd = Command(CommandType::CHANNEL, (uint16_t)0);
+                commands.insert(commands.begin() + pos, cmd);
+                equalizer->commands_mutex.lock();
+                equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
+                equalizer->commands_mutex.unlock();
+                eq_channel->send_if_unique({
+                    .type = MsgType::COMMANDS_CHANGED,
+                });
+                command_added = true;
+            }
+            if(ImGui::MenuItem("Copy")) {
+                Command cmd = Command(CommandType::COPY, Copy{ .from_channels = 1 << 0, .to_channel = 1 << 0 });
                 commands.insert(commands.begin() + pos, cmd);
                 equalizer->commands_mutex.lock();
                 equalizer->commands.insert(equalizer->commands.begin() + pos, cmd);
