@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -77,19 +78,58 @@ static void parse_filter(std::istringstream &iss, std::vector<Command>& commands
     }
 }
 
+struct ChannelName {
+    const char* name;
+    uint16_t channel;
+};
+
+static const ChannelName CHANNEL_NAMES[] = {
+    { "LFE", 1 << 3 }, { "SUB", 1 << 3 },
+    { "FL",  1 << 0 }, { "FR",  1 << 1 }, { "FC",  1 << 2 },
+    { "RL",  1 << 4 }, { "RR",  1 << 5 }, { "RC",  1 << 6 },
+    { "SL",  1 << 7 }, { "SR",  1 << 8 },
+    { "L",   1 << 0 }, { "R",   1 << 1 }, { "C",   1 << 2 },
+};
+
+static uint16_t parse_channel_num(const std::string& str) {
+    for(const auto& entry : CHANNEL_NAMES) {
+        if(str == entry.name) return entry.channel;
+    }
+    return 0;
+}
+
+static const char* channel_name(uint16_t channel) {
+    switch(channel) {
+    case 1 << 0: return "L";
+    case 1 << 1: return "R";
+    case 1 << 2: return "C";
+    case 1 << 3: return "LFE";
+    case 1 << 4: return "RL";
+    case 1 << 5: return "RR";
+    case 1 << 6: return "RC";
+    case 1 << 7: return "SL";
+    case 1 << 8: return "SR";
+    default: return nullptr;
+    }
+}
+
+static bool match_channel_name(const std::string& str, size_t pos, uint16_t& channel, size_t& length) {
+    for(const auto& entry : CHANNEL_NAMES) {
+        size_t len = strlen(entry.name);
+        if(str.compare(pos, len, entry.name) == 0) {
+            channel = entry.channel;
+            length = len;
+            return true;
+        }
+    }
+    return false;
+}
+
 static void parse_channel(std::istringstream &iss, std::vector<Command>& commands) {
     std::string cmdlet;
     uint16_t channels = 0;
     while(iss >> cmdlet) {
-        if(cmdlet == "L") channels |= 1 << 0;
-        if(cmdlet == "R") channels |= 1 << 1;
-        if(cmdlet == "C") channels |= 1 << 2;
-        if(cmdlet == "LFE") channels |= 1 << 3;
-        if(cmdlet == "RL") channels |= 1 << 4;
-        if(cmdlet == "RR") channels |= 1 << 5;
-        if(cmdlet == "RC") channels |= 1 << 6;
-        if(cmdlet == "SL") channels |= 1 << 7;
-        if(cmdlet == "SR") channels |= 1 << 8;
+        channels |= parse_channel_num(cmdlet);
     }
     commands.push_back(Command(CommandType::CHANNEL, channels));
 }
@@ -110,6 +150,47 @@ static void parse_color(std::istringstream &iss, std::vector<Command>& commands)
     commands.push_back(Command(CommandType::COLOR, (float)r/255.0, (float)g/255.0, (float)b/255.0));
     std::string temp;
     while(iss >> temp) {}
+}
+
+static void parse_copy(std::istringstream &iss, std::vector<Command>& commands) {
+    std::string line;
+    std::getline(iss, line);
+
+    std::string expression;
+    for(const char c : line) {
+        if(!std::isspace(static_cast<unsigned char>(c))) expression += c;
+    }
+
+    size_t pos = 0;
+    while(pos < expression.size()) {
+        uint16_t to_channel = 0;
+        uint16_t from_channels = 0;
+        size_t length = 0;
+
+        if(!match_channel_name(expression, pos, to_channel, length)) break;
+        pos += length;
+
+        if(pos >= expression.size() || expression[pos] != '=') break;
+        pos++;
+
+        bool have_source = false;
+        while(pos < expression.size()) {
+            uint16_t source = 0;
+            if(!match_channel_name(expression, pos, source, length)) break;
+            from_channels |= source;
+            have_source = true;
+            pos += length;
+
+            if(pos < expression.size() && expression[pos] == '+') {
+                pos++;
+                continue;
+            }
+            break;
+        }
+
+        if(!have_source) break;
+        commands.push_back(Command(CommandType::COPY, Copy{ .from_channels = from_channels, .to_channel = to_channel }));
+    }
 }
 
 static void deserialize_config(const char* path, std::vector<Command>& commands) {
@@ -137,6 +218,8 @@ static void deserialize_config(const char* path, std::vector<Command>& commands)
                 parse_channel(iss, commands);
             }else if(cmdlet == "Color:") {
                 parse_color(iss, commands);
+            }else if(cmdlet == "Copy:") {
+                parse_copy(iss, commands);
             }else {
                 parse_comment(line, commands);
                 while(iss >> cmdlet) {}
@@ -187,6 +270,30 @@ static void serialize_config(const char* path, std::vector<Command>& commands) {
                 break;
             case CommandType::COLOR:
                 file << "Color: " << (int)(command.color.r*255.0) << " " << (int)(command.color.g*255.0) << " " << (int)(command.color.b*255.0);
+                break;
+            case CommandType::COPY:
+                file << "Copy: ";
+                {
+                    const char* destination = nullptr;
+                    for(int i = 0; i < 9; i++) {
+                        if(command.copy.to_channel & (1 << i)) {
+                            destination = channel_name(1 << i);
+                            break;
+                        }
+                    }
+                    if(destination == nullptr) break;
+
+                    file << destination << '=';
+
+                    bool need_plus = false;
+                    for(int i = 0; i < 9; i++) {
+                        if(command.copy.from_channels & (1 << i)) {
+                            if(need_plus) file << '+';
+                            file << channel_name(1 << i);
+                            need_plus = true;
+                        }
+                    }
+                }
                 break;
             default:
                 std::cout << "Failed to save config param of type " << command.type << std::endl;

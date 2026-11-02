@@ -1,6 +1,8 @@
 #include "app.h"
 #include "SDL3/SDL_error.h"
+#include "appconfig.hpp"
 #include "command.h"
+#include "config_window.hpp"
 #include "eq.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -15,18 +17,26 @@
 #include <filesystem>
 
 App::App() {
+
+    const char* config_env = getenv("XDG_CONFIG_HOME");
+    if(config_env == nullptr) config_path = std::string(getenv("HOME")) + "/.config/equalizer-pwf";
+    else config_path = std::string(config_env) + "/equalizer-pwf";
+    std::string appconfig_path = config_path;
+    std::filesystem::create_directory(config_path);
+    config_path.append("/config.txt");
+    appconfig_path.append("/appconfig.txt");
+
+    app_config = new AppConfig(appconfig_path);
+    config_win = new ConfigWindow(app_config);
+
+    hide_window = !app_config->show_window_on_start;
+
     ui_done = false;
     ui_thread = new std::thread(&App::ui_start, this);
     eq_channel = new Channel<Msg>();
     ui_channel = new Channel<Msg>();
 
     equalizer = new Equalizer(eq_channel, ui_channel);
-
-    const char* config_env = getenv("XDG_CONFIG_HOME");
-    if(config_env == nullptr) config_path = std::string(getenv("HOME")) + "/.config/equalizer-pwf";
-    else config_path = std::string(config_env) + "/equalizer-pwf";
-    std::filesystem::create_directory(config_path);
-    config_path.append("/config.txt");
     
     Config::deserialize_config(config_path.c_str(), commands);
     for(const auto command : commands) {
@@ -38,7 +48,12 @@ App::App() {
 }
 
 App::~App() {
-    free(equalizer);
+    delete equalizer;
+    delete eq_channel;
+    delete ui_channel;
+    delete ui_thread;
+    delete config_win;
+    delete app_config;
 }
 
 static float peak_gain = 0.0;
@@ -68,7 +83,6 @@ bool App::ui_render() {
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_MenuBar);
 
     static std::string selected_name = "Default";
-    ImGui::Columns(2, nullptr, false);
     ImGui::Text("Device:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
@@ -89,14 +103,6 @@ bool App::ui_render() {
             ImGui::EndCombo();
         }
     }
-    ImGui::NextColumn();
-    ImGui::Text("Channel configuration:");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(-1);
-    if(ImGui::BeginCombo("###channelconfig", "67.1 Surround")) {
-        ImGui::EndCombo();
-    }
-    ImGui::EndColumns();
 
     ImGui::Columns(2, nullptr, false);
     ImGui::SetColumnWidth(0, ImGui::CalcTextSize("Channels: Abc").x + 80.0);
@@ -113,6 +119,9 @@ bool App::ui_render() {
             }
             ImGui::EndCombo();
         }
+    }
+    if(ImGui::Button("Open Settings")) {
+        show_config_win = true;
     }
     ImGui::NextColumn();
     if(ImPlot::BeginPlot("Frequency Response", ImVec2(-1, 0), ImPlotFlags_NoLegend)) {
@@ -229,6 +238,10 @@ bool App::ui_render() {
     ImGui::EndListBox();
 
     ImGui::End();
+
+    if(show_config_win && config_win != nullptr) {
+        show_config_win = config_win->render();
+    }
 
     return true;
 }

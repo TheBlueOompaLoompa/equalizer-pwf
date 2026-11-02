@@ -3,6 +3,7 @@
 #include "util.h"
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <unordered_map>
 #include <vector>
@@ -19,8 +20,9 @@ enum CommandType {
     CHANNEL,
     COLOR,
     COMMENT,
+    COPY,
 };
-#define IS_FILTER_COMMAND_TYPE(type) (type != CommandType::PREAMP && type != CommandType::CHANNEL && type != CommandType::COLOR && type != CommandType::COMMENT)
+#define IS_FILTER_COMMAND_TYPE(type) (type != CommandType::PREAMP && type != CommandType::CHANNEL && type != CommandType::COLOR && type != CommandType::COMMENT && type != CommandType::COPY)
 
 enum ShelfShaper {
     Q,
@@ -53,6 +55,11 @@ struct Comment {
     size_t size;
 };
 
+struct Copy {
+    uint16_t from_channels;
+    uint16_t to_channel;
+};
+
 class Command {
 public:
     CommandType type;
@@ -65,24 +72,35 @@ public:
             float g;
             float b;
         } color;
+        Copy copy;
     };
 
     Command(CommandType t, AudioFilterConfig a) {
+        memset(&audio, 0, sizeof(audio));
         type = t;
         audio = a;
     }
 
     Command(CommandType t, uint16_t ch) {
+        memset(&audio, 0, sizeof(audio));
         type = t;
         channels = ch;
     }
 
     Command(CommandType t, Comment* cm) {
+        memset(&audio, 0, sizeof(audio));
         type = t;
         comment = cm;
     }
 
+    Command(CommandType t, Copy cpy) {
+        memset(&audio, 0, sizeof(audio));
+        type = t;
+        copy = cpy;
+    }
+
     Command(CommandType t, float r, float g, float b) {
+        memset(&audio, 0, sizeof(audio));
         type = t;
         color.r = r;
         color.g = g;
@@ -98,8 +116,14 @@ public:
             comment->size = other.comment->size;
             memcpy(comment->text, other.comment->text, other.comment->size);
             break;
+        case CommandType::COLOR:
+            color = other.color;
+            break;
         case CommandType::CHANNEL:
             channels = other.channels;
+            break;
+        case CommandType::COPY:
+            copy = other.copy;
             break;
         default:
             audio = other.audio;
@@ -124,8 +148,14 @@ public:
             comment->size = other.comment->size;
             memcpy(comment->text, other.comment->text, other.comment->size);
             break;
+        case CommandType::COLOR:
+            color = other.color;
+            break;
         case CommandType::CHANNEL:
             channels = other.channels;
+            break;
+        case CommandType::COPY:
+            copy = other.copy;
             break;
         default:
             audio = other.audio;
@@ -177,6 +207,7 @@ public:
         case CommandType::CHANNEL:
         case CommandType::COLOR:
         case CommandType::COMMENT:
+        case CommandType::COPY:
             break;
         default:
             if(audio.chain_filters->find(device_id) != audio.chain_filters->end() && (*audio.chain_filters)[device_id].find(channel) != (*audio.chain_filters)[device_id].end())

@@ -8,7 +8,9 @@
 #include <vector>
 #include <csignal>
 
+#include "appconfig.hpp"
 #include "channel.h"
+#include "config_window.hpp"
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
@@ -57,6 +59,10 @@ private:
     float bad_resp_samples[22000/2] = {0};
 
     std::string config_path;
+
+    AppConfig* app_config;
+    bool show_config_win = false;
+    ConfigWindow* config_win;
 
     ImGuiStyle default_style;
 
